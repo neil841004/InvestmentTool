@@ -48,7 +48,6 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     .stDeployButton {display:none !important;}
     .stAppDeployButton {display:none !important;}
-    [data-testid="stToolbar"] {display:none !important;}
     header[data-testid="stHeader"] {
         background: transparent !important;
     }
@@ -72,16 +71,20 @@ st.markdown("""
     }
 
     /* RWD 對於卡片顯示區域 */
-    div[data-testid="stElementContainer"]:has(.card-grid-marker) ~ div[data-testid="stHorizontalBlock"] {
+    div[data-testid="stHorizontalBlock"] {
         flex-wrap: wrap !important;
     }
+    
+    /* When inside card view, ensure columns have a minimum width to enable wrapping */
     div[data-testid="stElementContainer"]:has(.card-grid-marker) ~ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        min-width: 320px !important;
-        flex: 1 1 320px !important;
+        min-width: 300px !important;
+        flex: 1 1 300px !important;
+        max-width: none !important; /* Override Streamlit's fixed 20% max-width */
     }
     
-    /* 隱藏 Popover 按鈕自帶的向下箭頭 */
-    div[data-testid="stPopover"] button svg {
+    /* 隱藏 Popover 按鈕自帶的向下箭頭 (包含 SVG 與 Material Symbols) */
+    div[data-testid="stPopover"] button svg,
+    div[data-testid="stPopover"] button span.material-symbols-rounded {
         display: none !important;
     }
     
@@ -379,7 +382,7 @@ def render_edit_popover(item, key_prefix):
                 
             if submitted:
                 wm.update_ticker_data(
-                    ticker, item.get('note',''), n_rating, st.session_state.current_group,
+                    ticker, item.get('note',''), n_rating,
                     n_yurl, n_tvurl, n_avg, n_sh, n_tags, n_custom
                 )
                 item.update({
@@ -390,7 +393,7 @@ def render_edit_popover(item, key_prefix):
                 st.rerun(scope="fragment")
                 
             if deleted:
-                wm.remove_ticker_from_watchlist(ticker, st.session_state.current_group)
+                wm.remove_ticker_from_watchlist(ticker)
                 st.rerun()
 
 def render_note_popover(item, key_prefix):
@@ -402,7 +405,7 @@ def render_note_popover(item, key_prefix):
         new_note = st.text_area("Note", value=note_text, height=300, key=f"note_area_{key_prefix}_{ticker}")
         if new_note != note_text:
             wm.update_ticker_data(
-                ticker, new_note, item.get('rating',0), st.session_state.current_group,
+                ticker, new_note, item.get('rating',0),
                 item.get('yahoo_url',''), item.get('tradingview_url',''),
                 item.get('avg_cost',0.0), item.get('shares',0.0),
                 item.get('tags',[]), item.get('custom_name','')
@@ -512,7 +515,7 @@ def add_ticker_dialog():
     if st.button("Add to Watchlist"):
         target_ticker = custom_ticker.upper() if custom_ticker else (selected_option.split(" | ")[0] if selected_option != "Type to search..." else None)
         if target_ticker:
-            success, msg = wm.add_ticker_to_watchlist(target_ticker, st.session_state.current_group)
+            success, msg = wm.add_ticker_to_watchlist(target_ticker)
             if success: st.success(msg); time.sleep(0.5); st.rerun()
             else: st.warning(msg)
 
@@ -520,17 +523,22 @@ def add_ticker_dialog():
 
 # --- 主程式狀態寫入 ---
 data = wm.load_watchlist()
+# After loading check if migration happened
+if isinstance(data, dict):
+    # This shouldn't happen unless app started before migration fully finished in background, fallback
+    st.rerun()
 
-if 'current_group' not in st.session_state:
-    st.session_state.current_group = "Default"
-if st.session_state.current_group not in data:
-    st.session_state.current_group = list(data.keys())[0] if data else "Default"
-    
 if 'display_mode' not in st.session_state:
     st.session_state.display_mode = "Card View"
 
-if 'active_tag_filter' not in st.session_state:
-    st.session_state.active_tag_filter = None
+if 'active_tag_filter' not in st.session_state or not isinstance(st.session_state.active_tag_filter, list):
+    st.session_state.active_tag_filter = []
+
+if 'active_holding_filter' not in st.session_state or not isinstance(st.session_state.active_holding_filter, list):
+    st.session_state.active_holding_filter = []
+
+if 'active_rating_filter' not in st.session_state or not isinstance(st.session_state.active_rating_filter, list):
+    st.session_state.active_rating_filter = []
 
 # 確保 settings 已經載入
 _ = load_settings()
@@ -540,14 +548,8 @@ _ = load_settings()
 all_needed_tickers = set()
 all_needed_tickers.add("USDTWD=X")
 
-for g_items in data.values():
-    for item in g_items:
-        if item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0:
-            all_needed_tickers.add(item['ticker'])
-
-if st.session_state.current_group in data:
-    for item in data[st.session_state.current_group]:
-        all_needed_tickers.add(item['ticker'])
+for item in data:
+    all_needed_tickers.add(item['ticker'])
 
 def prefetch_ticker(args):
     t, period, d_mode, sort_pref = args
@@ -582,23 +584,21 @@ with st.sidebar:
     total_value = 0.0
     usdtwd = get_usdtwd_rate()
     
-    # Calculate across all groups
-    for g_items in data.values():
-        for item in g_items:
-            live_p = get_live_price(item['ticker'])
-            avg_cost = item.get('avg_cost', 0.0)
-            shares = item.get('shares', 0.0)
-            if avg_cost > 0 and shares > 0 and live_p is not None:
-                item_cost = avg_cost * shares
-                item_value = live_p * shares
+    for item in data:
+        live_p = get_live_price(item['ticker'])
+        avg_cost = item.get('avg_cost', 0.0)
+        shares = item.get('shares', 0.0)
+        if avg_cost > 0 and shares > 0 and live_p is not None:
+            item_cost = avg_cost * shares
+            item_value = live_p * shares
+            
+            # Convert to TWD (if it's US or Crypto)
+            if get_market_type(item['ticker']) in ["us", "crypto"]:
+                item_cost *= usdtwd
+                item_value *= usdtwd
                 
-                # Convert to TWD (if it's US or Crypto)
-                if get_market_type(item['ticker']) in ["us", "crypto"]:
-                    item_cost *= usdtwd
-                    item_value *= usdtwd
-                    
-                total_cost += item_cost
-                total_value += item_value
+            total_cost += item_cost
+            total_value += item_value
                 
     total_profit = total_value - total_cost
     total_pct = (total_profit / total_cost * 100) if total_cost > 0 else 0
@@ -616,40 +616,12 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    st.header("🗂️ Groups")
     
-    c_group = st.radio("Select Group", options=list(data.keys()), index=list(data.keys()).index(st.session_state.current_group) if st.session_state.current_group in data else 0, label_visibility="collapsed")
-    if c_group != st.session_state.current_group:
-        st.session_state.current_group = c_group
-        st.rerun()
-        
-    with st.expander("Manage Groups"):
-        new_g = st.text_input("New Group Name")
-        if st.button("Add Group"):
-            if new_g:
-                wm.add_group(new_g)
-                st.session_state.current_group = new_g
-                st.rerun()
-        
-        rename_to = st.text_input("Rename Current Group To")
-        if st.button("Rename"):
-            if rename_to:
-                wm.rename_group(st.session_state.current_group, rename_to)
-                st.session_state.current_group = rename_to
-                st.rerun()
-                
-        if st.button("Delete Current Group"):
-            wm.delete_group(st.session_state.current_group)
-            st.rerun()
-            
     st.markdown("---")
-    st.header("🏷️ Tags")
     
-    current_g_items = data.get(st.session_state.current_group, [])
     tag_counts = {}
     no_tag_count = 0
-    for item in current_g_items:
+    for item in data:
         tags = item.get('tags', [])
         if not tags:
             no_tag_count += 1
@@ -660,6 +632,26 @@ with st.sidebar:
     # Sort tags by count descending
     sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
     
+    c_hdr, c_edit = st.columns([0.85, 0.15], vertical_alignment="bottom")
+    with c_hdr:
+        st.header("🏷️ Tags")
+    with c_edit:
+        with st.popover("🎨", help="自訂標籤顏色"):
+            st.markdown("**編輯標籤顏色**")
+            
+            def update_tag_color(t_name):
+                new_c = st.session_state[f"global_cp_{t_name}"]
+                s = st.session_state.settings
+                if "tag_colors" not in s: s["tag_colors"] = {}
+                s["tag_colors"][t_name] = new_c
+                save_settings(s)
+                
+            for tag_name, _ in sorted_tags:
+                current_c = st.session_state.settings.get("tag_colors", {}).get(tag_name, get_tag_color(tag_name))
+                if "hsl" in current_c:
+                    current_c = "#888888" # Fallback
+                st.color_picker(tag_name, value=current_c, key=f"global_cp_{tag_name}", on_change=update_tag_color, args=(tag_name,))
+    
     # 預先收集所有用到的顏色的 CSS，注入一次即可
     tag_styles = """
     /* 隱藏所有的 marker 元件，不佔據任何空間避免產生錯誤的排版間距 */
@@ -667,19 +659,9 @@ with st.sidebar:
         display: none !important;
     }
     
-    /* 對齊右側漢堡選單的樣式：讓按鈕滿版高度，並且移除 padding 使其對齊左側 */
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(2) button {
-        height: 100% !important;
-        min-height: 42px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
     
     /* 讓被選取的 Tag 有明顯的發光亮框 */
-    div[data-testid="stElementContainer"]:has(.tag-active) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(1) button {
+    div[data-testid="stElementContainer"]:has(.tag-active) + div[data-testid="stElementContainer"] button {
         border: 2px solid white !important;
         font-weight: bold !important;
         box-shadow: 0 0 8px rgba(255,255,255,0.4);
@@ -690,12 +672,16 @@ with st.sidebar:
         bg_col = get_tag_color(tag_name)
         c_name = "tag-btn-" + hashlib.md5(tag_name.encode()).hexdigest()
         tag_styles += f"""
-        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(1) button {{
+        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button {{
             background-color: {bg_col} !important;
             border-color: rgba(255,255,255,0.2) !important;
             color: white !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            padding-left: 15px !important;
+            padding-right: 15px !important;
         }}
-        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(1) button:hover {{
+        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button:hover {{
             filter: brightness(1.2) !important;
             border-color: rgba(255,255,255,0.5) !important;
         }}
@@ -703,14 +689,26 @@ with st.sidebar:
     
     # 無標籤的樣式
     tag_styles += """
-    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(1) button {
+    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button {
         background-color: #444444 !important;
         border-color: rgba(255,255,255,0.2) !important;
         color: white !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        padding-left: 15px !important;
+        padding-right: 15px !important;
     }
-    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stHorizontalBlock"] div[data-testid="column"]:nth-child(1) button:hover {
+    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button:hover {
         filter: brightness(1.2) !important;
         border-color: rgba(255,255,255,0.5) !important;
+    }
+
+    /* Target the generic sidebar filter buttons (Holding and Rating) which use stElementContainer but don't have stHorizontalBlock */
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button {
+        display: flex !important;
+        justify-content: space-between !important;
+        padding-left: 15px !important;
+        padding-right: 15px !important;
     }
     """
     
@@ -718,8 +716,8 @@ with st.sidebar:
     
     def render_sidebar_tag(tag_name, count, is_no_tag=False):
         bg_col = get_tag_color(tag_name) if not is_no_tag else "#555555"
-        is_active = st.session_state.get('active_tag_filter') == tag_name
-        if is_no_tag and st.session_state.get('active_tag_filter') == "NO_TAG":
+        is_active = tag_name in st.session_state.get('active_tag_filter', [])
+        if is_no_tag and "NO_TAG" in st.session_state.get('active_tag_filter', []):
             is_active = True
             
         eye_icon = "👁️" if is_active else "👁‍🗨"
@@ -730,32 +728,14 @@ with st.sidebar:
         # 魔法錨點：用於讓 CSS 精準上色，且不佔據空間
         st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
-        # 使用間距小的列
-        cc1, cc2 = st.columns([0.8, 0.2], gap="small")
-        with cc1:
-            btn_label = f"{eye_icon} {tag_name} ({count})"
-            if st.button(btn_label, key=f"filter_tag_{tag_name}", use_container_width=True):
-                if is_active:
-                    st.session_state.active_tag_filter = None
-                else:
-                    st.session_state.active_tag_filter = "NO_TAG" if is_no_tag else tag_name
-                st.rerun()
-        with cc2:
-            if not is_no_tag: # 「無標籤」不需要選色
-                with st.popover("≡", help=f"Edit {tag_name} color"):
-                    st.markdown("**Edit Color**")
-                    current_c = st.session_state.settings.get("tag_colors", {}).get(tag_name, bg_col)
-                    # 嘗試轉換 hsl 到 hex 或者讓使用者挑選接近的 hex。
-                    # 因為 st.color_picker 只支援 hex，若 current_c 是 hsl，我們先預設一個灰色，要求使用者選新的。
-                    if "hsl" in current_c:
-                        current_c = "#888888" # Fallback if previously hsl
-                    new_c = st.color_picker("Pick a color", value=current_c, key=f"cp_{tag_name}")
-                    if st.button("Save Color", key=f"save_c_{tag_name}", use_container_width=True):
-                        s = st.session_state.settings
-                        if "tag_colors" not in s: s["tag_colors"] = {}
-                        s["tag_colors"][tag_name] = new_c
-                        save_settings(s)
-                        st.rerun()
+        btn_label = f"{eye_icon} {tag_name} ㅤ {count}" 
+        if st.button(btn_label, key=f"filter_tag_{tag_name}", use_container_width=True):
+            target = "NO_TAG" if is_no_tag else tag_name
+            if target in st.session_state.active_tag_filter:
+                st.session_state.active_tag_filter.remove(target)
+            else:
+                st.session_state.active_tag_filter.append(target)
+            st.rerun()
 
     # 渲染「無標籤」
     if no_tag_count > 0:
@@ -764,9 +744,88 @@ with st.sidebar:
     for t_val, t_cnt in sorted_tags:
         render_sidebar_tag(t_val, t_cnt)
         
-    if st.session_state.get('active_tag_filter') is not None:
-        if st.button("✖️ Clear Filter", use_container_width=True):
-            st.session_state.active_tag_filter = None
+    if st.session_state.get('active_tag_filter'):
+        if st.button("✖️ Clear Tag Filter", use_container_width=True):
+            st.session_state.active_tag_filter = []
+            st.rerun()
+
+    st.markdown("---")
+    
+    # --- Holding Status Filter ---
+    st.header("💼 狀態")
+    held_count = 0
+    not_held_count = 0
+    for item in data:
+        if item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0:
+            held_count += 1
+        else:
+            not_held_count += 1
+
+    def render_holding_filter(status, count, filter_key):
+        is_active = filter_key in st.session_state.get('active_holding_filter', [])
+        eye_icon = "👁️" if is_active else "👁‍🗨"
+        css_class = "tag-btn-notag"
+        if is_active:
+            css_class += " tag-active"
+        
+        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+        
+        btn_label = f"{eye_icon} {status} ㅤ {count}"
+        if st.button(btn_label, key=f"filter_holding_{filter_key}", use_container_width=True):
+            if filter_key in st.session_state.active_holding_filter:
+                st.session_state.active_holding_filter.remove(filter_key)
+            else:
+                st.session_state.active_holding_filter.append(filter_key)
+            st.rerun()
+
+    if held_count > 0:
+        render_holding_filter("持有中", held_count, "HELD")
+    if not_held_count > 0:
+        render_holding_filter("未買進", not_held_count, "NOT_HELD")
+
+    if st.session_state.get('active_holding_filter'):
+        if st.button("✖️ Clear Status Filter", use_container_width=True):
+            st.session_state.active_holding_filter = []
+            st.rerun()
+
+    st.markdown("---")
+
+    # --- Rating Filter ---
+    st.header("⭐ 評分")
+    rating_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0, 0: 0}
+    for item in data:
+        rate = item.get('rating', 0)
+        if rate in rating_counts:
+            rating_counts[rate] += 1
+        else:
+            rating_counts[0] += 1
+            
+    def render_rating_filter(stars, count):
+        is_active = stars in st.session_state.get('active_rating_filter', [])
+        eye_icon = "👁️" if is_active else "👁‍🗨"
+        css_class = "tag-btn-notag"
+        if is_active:
+            css_class += " tag-active"
+        
+        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+        
+        label = f"{stars} 星" if stars > 0 else "未評分"
+        btn_label = f"{eye_icon} {label} ㅤ {count}"
+        if st.button(btn_label, key=f"filter_rating_{stars}", use_container_width=True):
+            if stars in st.session_state.active_rating_filter:
+                st.session_state.active_rating_filter.remove(stars)
+            else:
+                st.session_state.active_rating_filter.append(stars)
+            st.rerun()
+
+    for s in [5, 4, 3, 2, 1, 0]:
+        val = rating_counts[s]
+        if val > 0:
+            render_rating_filter(s, val)
+
+    if st.session_state.get('active_rating_filter'):
+        if st.button("✖️ Clear Rating Filter", use_container_width=True):
+            st.session_state.active_rating_filter = []
             st.rerun()
             
 # --- 前置設定 ---
@@ -790,9 +849,8 @@ if st.session_state.refresh_interval > 0:
 def handle_global_period_change():
     gp = st.session_state.get("global_period_ui")
     if gp:
-        current_g = st.session_state.get("current_group", "Default")
         global_data = wm.load_watchlist()
-        for t in global_data.get(current_g, []):
+        for t in global_data:
             tick = t['ticker']
             st.session_state[f"period_{tick}"] = gp
             st.session_state[f"period_{tick}_seg"] = gp
@@ -857,7 +915,7 @@ with c_set:
             
         st.caption("Press 'R' to refresh manually.")
 
-current_items = data.get(st.session_state.current_group, [])
+current_items = data
 
 # --- 排序邏輯 ---
 def apply_sort(items, method):
@@ -893,11 +951,27 @@ def apply_sort(items, method):
 
 current_items = apply_sort(current_items, st.session_state.get('sort_pref', "Type (TW > US > Crypto)"))
 
-# 套用標籤過濾
-if st.session_state.active_tag_filter == "NO_TAG":
-    current_items = [item for item in current_items if not item.get('tags', [])]
-elif st.session_state.active_tag_filter:
-    current_items = [item for item in current_items if st.session_state.active_tag_filter in item.get('tags', [])]
+# 套用標籤過濾 (OR logic for tags)
+if st.session_state.active_tag_filter:
+    active_tags = st.session_state.active_tag_filter
+    current_items = [
+        item for item in current_items
+        if ("NO_TAG" in active_tags and not item.get('tags', [])) or any(t in active_tags for t in item.get('tags', []))
+    ]
+
+# 套用 Holding 狀態過濾 (OR logic for holding)
+if st.session_state.active_holding_filter:
+    active_holdings = st.session_state.active_holding_filter
+    current_items = [
+        item for item in current_items
+        if ("HELD" in active_holdings and item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0) or
+           ("NOT_HELD" in active_holdings and not (item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0))
+    ]
+
+# 套用評分過濾 (OR logic for ratings)
+if st.session_state.active_rating_filter:
+    active_ratings = st.session_state.active_rating_filter
+    current_items = [item for item in current_items if item.get('rating', 0) in active_ratings]
 
 if not current_items:
     st.info("Watchlist is empty in this group.")
