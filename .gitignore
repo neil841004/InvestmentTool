@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual Environment ---
+.venv
+venv
+ENV/
+
+# --- Streamlit ---
+.streamlit/
+! .streamlit/config.toml
+! .streamlit/credentials.toml
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Project Specific (User Data) ---
+# 這些檔案包含您的投資組合與設定，建議不要上傳到公開的 GitHub
+watchlist.json
+settings.json
