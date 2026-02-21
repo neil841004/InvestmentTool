@@ -1,0 +1,447 @@
+{
+    "持股": [
+        {
+            "ticker": "BTC-USD",
+            "custom_name": "",
+            "note": "",
+            "rating": 4,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 83600.0,
+            "shares": 0.004731,
+            "tags": []
+        },
+        {
+            "ticker": "2330.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 5,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 1005.0,
+            "shares": 121.0,
+            "tags": []
+        },
+        {
+            "ticker": "NVDA",
+            "custom_name": "",
+            "note": "",
+            "rating": 4,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 157.71,
+            "shares": 9.5183,
+            "tags": []
+        },
+        {
+            "ticker": "TSLA",
+            "custom_name": "",
+            "note": "",
+            "rating": 5,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 341.37,
+            "shares": 10.5531,
+            "tags": []
+        },
+        {
+            "ticker": "ETH-USD",
+            "custom_name": "",
+            "note": "",
+            "rating": 2,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 2184.0,
+            "shares": 0.171,
+            "tags": []
+        },
+        {
+            "ticker": "GOOGL",
+            "custom_name": "",
+            "note": "",
+            "rating": 5,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 300.5,
+            "shares": 0.4995,
+            "tags": []
+        },
+        {
+            "ticker": "0050.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 4,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 69.5,
+            "shares": 212.0,
+            "tags": []
+        },
+        {
+            "ticker": "0056.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 2,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 36.12,
+            "shares": 199.0,
+            "tags": []
+        },
+        {
+            "ticker": "00929.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 1,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 18.3,
+            "shares": 1000.0,
+            "tags": []
+        },
+        {
+            "ticker": "QQQ",
+            "custom_name": "",
+            "note": "",
+            "rating": 2,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": []
+        },
+        {
+            "ticker": "VOO",
+            "custom_name": "",
+            "note": "",
+            "rating": 5,
+            "holding": true,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 562.63,
+            "shares": 4.895,
+            "tags": []
+        }
+    ],
+    "關注": [
+        {
+            "ticker": "2395.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "SONY",
+            "custom_name": "",
+            "note": "影像感測器龍頭，機器人視覺核心零組件",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "4583.TW",
+            "custom_name": "台灣精銳",
+            "note": "全球諧波減速機龍頭: 它是機器人手臂的核心「心臟」。雖然 2025 年業績波動，但 2026 年預估獲利將大幅增長 25%，是純度最高的機器人標的。",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "2317.TW",
+            "custom_name": "",
+            "note": "具備大規模人形機器人代工能力",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "2382.TW",
+            "custom_name": "",
+            "note": "旗下達明機器人（TM Robot）佈局協作型機器人",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "2359.TW",
+            "custom_name": "所羅門",
+            "note": "3D 視覺辨識與工業 AI",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "機器人"
+            ]
+        },
+        {
+            "ticker": "SDGR",
+            "custom_name": "",
+            "note": "物理模擬結合 AI 篩選分子，與 Eli Lilly 深度合作",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "生物科技"
+            ]
+        },
+        {
+            "ticker": "RXRX",
+            "custom_name": "",
+            "note": "AI + 自動化實驗室，將藥物研發「工業化」，獲 NVIDIA 投資",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "生物科技"
+            ]
+        },
+        {
+            "ticker": "NTLA",
+            "custom_name": "",
+            "note": "首家證明可 In Vivo 人體基因編輯；主攻 ATTR 澱粉樣變性，關注 2026 Phase 3 數據",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "生物科技"
+            ]
+        },
+        {
+            "ticker": "3184.TW",
+            "custom_name": "微邦",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "生物科技"
+            ]
+        },
+        {
+            "ticker": "6472.TW",
+            "custom_name": "保瑞",
+            "note": "2026 年展望審慎樂觀，營收有 95% 來自海外。受惠於併購 Upsher-Smith 帶來的產能整合，以及高潛力學名藥最快於 2026 年上市，其核心 EBITDA 預期成長率達 25-30%。",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "生物科技"
+            ]
+        },
+        {
+            "ticker": "3491.TW",
+            "custom_name": "昇達科",
+            "note": "微波 / 毫米波通訊元件，低軌衛星主要供應商",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "太空通訊"
+            ]
+        },
+        {
+            "ticker": "6285.TW",
+            "custom_name": "啟碁",
+            "note": "家用衛星接收器 ODM/OEM，量大穩定",
+            "rating": 4,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "太空通訊"
+            ]
+        },
+        {
+            "ticker": "2454.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "AI"
+            ]
+        },
+        {
+            "ticker": "AMD",
+            "custom_name": "",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "AI",
+                "科技"
+            ]
+        },
+        {
+            "ticker": "2337.TW",
+            "custom_name": "旺宏",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "AI"
+            ]
+        },
+        {
+            "ticker": "3008.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "AI"
+            ]
+        },
+        {
+            "ticker": "2327.TW",
+            "custom_name": "",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "AI"
+            ]
+        },
+        {
+            "ticker": "3293.TW",
+            "custom_name": "鈊象",
+            "note": "",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "遊戲"
+            ]
+        },
+        {
+            "ticker": "2355.TW",
+            "custom_name": "敬鵬",
+            "note": "高階板材，應用於航太 / 通訊",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "航太"
+            ]
+        },
+        {
+            "ticker": "2634.TW",
+            "custom_name": "漢翔",
+            "note": "航太結構件、抗高溫合金，具 Flight Heritage",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "航太"
+            ]
+        },
+        {
+            "ticker": "6443.TW",
+            "custom_name": "元晶",
+            "note": "能源系統（太陽能）、姿態控制",
+            "rating": 0,
+            "holding": false,
+            "yahoo_url": "",
+            "tradingview_url": "",
+            "avg_cost": 0.0,
+            "shares": 0.0,
+            "tags": [
+                "航太"
+            ]
+        }
+    ]
+}

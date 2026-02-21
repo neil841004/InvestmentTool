@@ -39,5 +39,5 @@ Thumbs.db
 
 # --- Project Specific (User Data) ---
 # 這些檔案包含您的投資組合與設定，建議不要上傳到公開的 GitHub
-watchlist.json
-settings.json
+# watchlist.json
+# settings.json
