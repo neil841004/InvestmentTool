@@ -44,7 +44,16 @@ st.set_page_config(layout="wide", page_title="Investment Dashboard v2", initial_
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117; }
-    /* 隱藏原生 Streamlit 右側選單與部署按鈕，但保留左側 Sidebar 展開按鈕 (Header) */
+    
+    /* 強制設定側邊欄顏色 */
+    section[data-testid="stSidebar"] {
+        background-color: #11141a !important;
+    }
+    section[data-testid="stSidebar"] .stMarkdown p, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2 {
+        color: white !important;
+    }
+
+    /* 隱藏原生 Streamlit 右側選單與部署按鈕 */
     #MainMenu {visibility: hidden;}
     .stDeployButton {display:none !important;}
     .stAppDeployButton {display:none !important;}
