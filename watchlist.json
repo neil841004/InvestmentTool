@@ -21,7 +21,9 @@
         "tradingview_url": "",
         "avg_cost": 1005.0,
         "shares": 121.0,
-        "tags": []
+        "tags": [
+            "科技"
+        ]
     },
     {
         "ticker": "NVDA",
@@ -33,7 +35,9 @@
         "tradingview_url": "",
         "avg_cost": 157.71,
         "shares": 9.5183,
-        "tags": []
+        "tags": [
+            "AI"
+        ]
     },
     {
         "ticker": "TSLA",
@@ -45,7 +49,10 @@
         "tradingview_url": "",
         "avg_cost": 341.37,
         "shares": 10.5531,
-        "tags": []
+        "tags": [
+            "AI",
+            "機器人"
+        ]
     },
     {
         "ticker": "ETH-USD",
@@ -69,7 +76,9 @@
         "tradingview_url": "",
         "avg_cost": 300.5,
         "shares": 0.4995,
-        "tags": []
+        "tags": [
+            "AI"
+        ]
     },
     {
         "ticker": "0050.TW",
@@ -81,7 +90,9 @@
         "tradingview_url": "",
         "avg_cost": 69.5,
         "shares": 212.0,
-        "tags": []
+        "tags": [
+            "ETF"
+        ]
     },
     {
         "ticker": "0056.TW",
@@ -93,7 +104,9 @@
         "tradingview_url": "",
         "avg_cost": 36.12,
         "shares": 199.0,
-        "tags": []
+        "tags": [
+            "ETF"
+        ]
     },
     {
         "ticker": "00929.TW",
@@ -105,7 +118,9 @@
         "tradingview_url": "",
         "avg_cost": 18.3,
         "shares": 1000.0,
-        "tags": []
+        "tags": [
+            "ETF"
+        ]
     },
     {
         "ticker": "QQQ",
@@ -117,7 +132,9 @@
         "tradingview_url": "",
         "avg_cost": 0.0,
         "shares": 0.0,
-        "tags": []
+        "tags": [
+            "ETF"
+        ]
     },
     {
         "ticker": "VOO",
@@ -129,7 +146,9 @@
         "tradingview_url": "",
         "avg_cost": 562.63,
         "shares": 4.895,
-        "tags": []
+        "tags": [
+            "ETF"
+        ]
     },
     {
         "ticker": "2395.TW",

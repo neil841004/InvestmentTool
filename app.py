@@ -162,6 +162,62 @@ st.markdown("""
     .sortable-handle:active {
         cursor: grabbing;
     }
+    
+    /* ===== 固定頂部工具列 ===== */
+    /* 隱藏 toolbar-marker 本身不佔空間 */
+    div[data-testid="stElementContainer"]:has(.toolbar-marker) {
+        display: none !important;
+    }
+    /* 工具列 = toolbar-marker 後面的第一個 stHorizontalBlock */
+    div[data-testid="stElementContainer"]:has(.toolbar-marker) + div[data-testid="stHorizontalBlock"] {
+        position: sticky !important;
+        top: 0px !important;
+        z-index: 100 !important;
+        background-color: #161b22 !important;
+        border-bottom: 1px solid #30363d !important;
+        padding: 6px 12px !important;
+        margin-left: -1rem !important;
+        margin-right: -1rem !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+    }
+    
+    /* ===== Filter 按鈕左右對齊 ===== */
+    /* 讓 sidebar 所有 filter 按鈕（tag, holding, rating）style 正確 */
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button {
+        width: 100% !important;
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+    }
+    /* button 內部 span/div 全部滿寬 */
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button > * {
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button span,
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button div[data-testid="stMarkdownContainer"] {
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p {
+        display: flex !important;
+        width: 100% !important;
+        align-items: center !important;
+        margin: 0 !important;
+        gap: 4px !important;
+    }
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p code {
+        margin-left: auto !important;
+        background: transparent !important;
+        border: none !important;
+        color: inherit !important;
+        font-size: 0.9em !important;
+        font-weight: bold !important;
+        padding: 0 !important;
+        opacity: 0.85 !important;
+        white-space: nowrap !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -361,15 +417,34 @@ def render_edit_popover(item, key_prefix):
                 n_avg = st.number_input("Avg Cost", value=float(item.get('avg_cost',0.0)), step=0.1)
             with c_sh:
                 n_sh = st.number_input("Shares/Qty", value=float(item.get('shares',0.0)), step=0.00001, format="%.5f")
+            # Collect all existing tags from all items for suggestions
+            all_existing_tags = set()
+            for other_item in wm.load_watchlist():
+                for t in other_item.get('tags', []):
+                    all_existing_tags.add(t)
+            
+            # Ensure currently selected tags are always in the options list
+            current_tags = item.get('tags', [])
+            for t in current_tags:
+                all_existing_tags.add(t)
                 
-            n_tags = st_tags(
-                label='Tags:',
-                text='Press enter to add more',
-                value=item.get('tags', []),
-                suggestions=['Tech', 'Crypto', 'ETF', 'Dividend', 'Growth'],
-                maxtags=10,
-                key=f"tg_{key_prefix}_{ticker}"
-            )
+            all_existing_tags = sorted(list(all_existing_tags))
+            
+            # Use columns to put multiselect and a text input side-by-side
+            c_m, c_new = st.columns([0.7, 0.3])
+            with c_m:
+                selected_tags = st.multiselect(
+                    label="Select Tags",
+                    options=all_existing_tags,
+                    default=current_tags,
+                    key=f"ms_{key_prefix}_{ticker}"
+                )
+            with c_new:
+                new_tag = st.text_input("Add New Tag", placeholder="Type & Save", key=f"nt_{key_prefix}_{ticker}")
+                
+            n_tags = selected_tags
+            if new_tag and new_tag not in n_tags:
+                n_tags.append(new_tag)
             
             n_yurl = st.text_input("Yahoo URL (Optional)", value=item.get('yahoo_url',''))
             n_tvurl = st.text_input("TradingView URL (Optional)", value=item.get('tradingview_url',''))
@@ -704,12 +779,28 @@ with st.sidebar:
     }
 
     /* Target the generic sidebar filter buttons (Holding and Rating) which use stElementContainer but don't have stHorizontalBlock */
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button {
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button span,
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button div[data-testid="stMarkdownContainer"] {{
+        width: 100% !important;
+    }}
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p {{
         display: flex !important;
-        justify-content: space-between !important;
-        padding-left: 15px !important;
-        padding-right: 15px !important;
-    }
+        width: 100% !important;
+        align-items: center !important;
+        gap: 0 !important;
+        margin: 0 !important;
+    }}
+    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p code {{
+        margin-left: auto !important;
+        background: transparent !important;
+        border: none !important;
+        color: inherit !important;
+        font-size: 0.9em !important;
+        font-weight: bold !important;
+        padding: 0 !important;
+        opacity: 0.8 !important;
+        white-space: nowrap !important;
+    }}
     """
     
     st.markdown(f"<style>{tag_styles}</style>", unsafe_allow_html=True)
@@ -728,7 +819,7 @@ with st.sidebar:
         # 魔法錨點：用於讓 CSS 精準上色，且不佔據空間
         st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
-        btn_label = f"{eye_icon} {tag_name} ㅤ {count}" 
+        btn_label = f"{eye_icon} {tag_name}  `{count}`" 
         if st.button(btn_label, key=f"filter_tag_{tag_name}", use_container_width=True):
             target = "NO_TAG" if is_no_tag else tag_name
             if target in st.session_state.active_tag_filter:
@@ -770,7 +861,7 @@ with st.sidebar:
         
         st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
-        btn_label = f"{eye_icon} {status} ㅤ {count}"
+        btn_label = f"{eye_icon} {status}  `{count}`"
         if st.button(btn_label, key=f"filter_holding_{filter_key}", use_container_width=True):
             if filter_key in st.session_state.active_holding_filter:
                 st.session_state.active_holding_filter.remove(filter_key)
@@ -810,7 +901,7 @@ with st.sidebar:
         st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
         label = f"{stars} 星" if stars > 0 else "未評分"
-        btn_label = f"{eye_icon} {label} ㅤ {count}"
+        btn_label = f"{eye_icon} {label}  `{count}`"
         if st.button(btn_label, key=f"filter_rating_{stars}", use_container_width=True):
             if stars in st.session_state.active_rating_filter:
                 st.session_state.active_rating_filter.remove(stars)
@@ -856,7 +947,7 @@ def handle_global_period_change():
             st.session_state[f"period_{tick}_seg"] = gp
 
 # --- 主畫面佈局 ---
-# 透過 Spacer 將控制項推向右側
+st.markdown('<div class="toolbar-marker"></div>', unsafe_allow_html=True)
 c_period, c_spacer, c_sort, c_disp, c_add, c_set = st.columns([0.25, 0.35, 0.2, 0.1, 0.05, 0.05], gap="small")
 
 with c_period:
