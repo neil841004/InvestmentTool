@@ -43,13 +43,39 @@ st.set_page_config(layout="wide", page_title="Investment Dashboard v2", initial_
 # --- CSS 樣式 ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0E1117; }
+    .stApp { background-color: #0E1117; color: white; }
     
     /* 強制設定側邊欄顏色 */
     section[data-testid="stSidebar"] {
         background-color: #11141a !important;
     }
     section[data-testid="stSidebar"] .stMarkdown p, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2 {
+        color: white !important;
+    }
+
+    /* 強制設定頁面所有按鈕與控制項為深色樣式 */
+    div[data-testid="stBaseButton-secondary"], button[data-testid="stBaseButton-secondary"],
+    div[data-testid="stBaseButton-headerNoPadding"],
+    div[data-testid="stSegmentedControl"] button {
+        background-color: #262730 !important;
+        border-color: #444 !important;
+        color: white !important;
+    }
+    
+    div[data-testid="stBaseButton-secondary"]:hover, div[data-testid="stSegmentedControl"] button:hover {
+        border-color: #00D4FF !important;
+        background-color: #31333F !important;
+    }
+
+    /* 被選取的分段按鈕樣式 */
+    div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+        background-color: #00D4FF !important;
+        color: black !important;
+    }
+
+    /* 下拉選單與輸入框 */
+    div[data-baseweb="select"], div[data-baseweb="input"] {
+        background-color: #262730 !important;
         color: white !important;
     }
 
