@@ -1,8 +1,7 @@
-streamlit
-yfinance
-pandas
-plotly
-matplotlib
-numpy
-streamlit-sortables
-streamlit-tags
+streamlit>=1.40.0
+yfinance>=0.2.48
+pandas>=2.0.0
+plotly>=5.18.0
+supabase>=2.3.0
+streamlit-sortables>=0.3.0
+streamlit-tags>=1.2.8

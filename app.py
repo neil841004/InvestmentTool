@@ -3,37 +3,44 @@ import yfinance as yf
 import pandas as pd
 import json
 import time
-import os
 import hashlib
 import concurrent.futures
 import plotly.graph_objects as go
 import watchlist_manager as wm
+from watchlist_manager import get_supabase
 from sparkline import create_sparkline
 from streamlit_sortables import sort_items
 from streamlit_tags import st_tags
 
 # --- Settings Management ---
-SETTINGS_FILE = "settings.json"
 
 def load_settings():
     if 'settings' in st.session_state:
         return st.session_state.settings
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                s = json.load(f)
-                st.session_state.settings = s
-                return s
-        except Exception:
-            pass
+    try:
+        sb = get_supabase()
+        response = sb.table("settings").select("*").eq("id", 1).execute()
+        if response.data:
+            row = response.data[0]
+            s = {
+                "refresh_interval": row.get("refresh_interval", 60),
+                "tag_colors": row.get("tag_colors", {}),
+            }
+            st.session_state.settings = s
+            return s
+    except Exception:
+        pass
     st.session_state.settings = {"refresh_interval": 60, "tag_colors": {}}
     return st.session_state.settings
 
 def save_settings(settings):
     st.session_state.settings = settings
     try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f)
+        sb = get_supabase()
+        sb.table("settings").update({
+            "refresh_interval": settings.get("refresh_interval", 60),
+            "tag_colors": settings.get("tag_colors", {}),
+        }).eq("id", 1).execute()
     except Exception:
         pass
 
@@ -43,43 +50,8 @@ st.set_page_config(layout="wide", page_title="Investment Dashboard v2", initial_
 # --- CSS 樣式 ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0E1117; color: white; }
-    
-    /* 強制設定側邊欄顏色 */
-    section[data-testid="stSidebar"] {
-        background-color: #11141a !important;
-    }
-    section[data-testid="stSidebar"] .stMarkdown p, section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2 {
-        color: white !important;
-    }
-
-    /* 強制設定頁面所有按鈕與控制項為深色樣式 */
-    div[data-testid="stBaseButton-secondary"], button[data-testid="stBaseButton-secondary"],
-    div[data-testid="stBaseButton-headerNoPadding"],
-    div[data-testid="stSegmentedControl"] button {
-        background-color: #262730 !important;
-        border-color: #444 !important;
-        color: white !important;
-    }
-    
-    div[data-testid="stBaseButton-secondary"]:hover, div[data-testid="stSegmentedControl"] button:hover {
-        border-color: #00D4FF !important;
-        background-color: #31333F !important;
-    }
-
-    /* 被選取的分段按鈕樣式 */
-    div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
-        background-color: #00D4FF !important;
-        color: black !important;
-    }
-
-    /* 下拉選單與輸入框 */
-    div[data-baseweb="select"], div[data-baseweb="input"] {
-        background-color: #262730 !important;
-        color: white !important;
-    }
-
-    /* 隱藏原生 Streamlit 右側選單與部署按鈕 */
+    .stApp { background-color: #0E1117; }
+    /* 隱藏原生 Streamlit 右側選單與部署按鈕，但保留左側 Sidebar 展開按鈕 (Header) */
     #MainMenu {visibility: hidden;}
     .stDeployButton {display:none !important;}
     .stAppDeployButton {display:none !important;}

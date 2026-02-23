@@ -1,43 +1,30 @@
 # --- Python ---
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+dist/
+build/
 
 # --- Virtual Environment ---
-.venv
-venv
+.venv/
+venv/
 ENV/
 
-# --- Streamlit ---
-.streamlit/
-! .streamlit/config.toml
-! .streamlit/credentials.toml
+# --- Streamlit Secrets（絕對不能上傳！包含資料庫金鑰）---
+.streamlit/secrets.toml
+
+# --- 個人投資資料（含持倉成本等敏感資訊）---
+watchlist.json
+settings.json
+
+# --- 資料遷移腳本（含明文金鑰，本地用完即刪）---
+migrate_to_supabase.py
 
 # --- IDE / OS ---
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-# --- Project Specific (User Data) ---
-# 這些檔案包含您的投資組合與設定，建議不要上傳到公開的 GitHub
-# watchlist.json
-# settings.json
+desktop.ini
