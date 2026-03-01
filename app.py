@@ -47,6 +47,45 @@ def save_settings(settings):
 # --- 設定頁面 ---
 st.set_page_config(layout="wide", page_title="Investment Dashboard v2", initial_sidebar_state="expanded")
 
+# --- 全域載入動畫 (Loading Spinner) ---
+spinner_placeholder = st.empty()
+spinner_placeholder.markdown(
+    """
+    <style>
+    .global-loader-wrapper {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 99999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background-color: rgba(14, 17, 23, 0.3);
+        pointer-events: none;
+    }
+    .global-loader {
+        width: 70px;
+        height: 70px;
+        border: 7px solid #1E1E1E;
+        border-top: 7px solid #00E676;
+        border-radius: 50%;
+        animation: global-spin 1s linear infinite;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+    @keyframes global-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    </style>
+    <div class="global-loader-wrapper">
+        <div class="global-loader"></div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- CSS 樣式 ---
 st.markdown("""
 <style>
@@ -1119,3 +1158,7 @@ else:
             
             for item in current_items:
                 render_list_item(item)
+
+# 腳本執行完畢，清除載入動畫
+spinner_placeholder.empty()
+
