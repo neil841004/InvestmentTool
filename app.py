@@ -11,36 +11,64 @@ from watchlist_manager import get_supabase
 from sparkline import create_sparkline
 from streamlit_sortables import sort_items
 from streamlit_tags import st_tags
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 # --- Settings Management ---
 
 def load_settings():
     if 'settings' in st.session_state:
         return st.session_state.settings
+    s = {"refresh_interval": 60, "tag_colors": {}, "default_period": "1M"}
+    
+    # 嘗試載入本機端 JSON 記錄的擴展設定 (主要為 default_period)
+    try:
+        import os, json
+        if os.path.exists("settings.json"):
+             with open("settings.json", "r", encoding="utf-8") as f:
+                  local_s = json.load(f)
+                  s.update(local_s)
+    except Exception:
+        pass
+
+    # 嘗試載入 Supabase 上的主設定
     try:
         sb = get_supabase()
         response = sb.table("settings").select("*").eq("id", 1).execute()
         if response.data:
             row = response.data[0]
-            s = {
-                "refresh_interval": row.get("refresh_interval", 60),
-                "tag_colors": row.get("tag_colors", {}),
-            }
-            st.session_state.settings = s
-            return s
+            if "refresh_interval" in row: s["refresh_interval"] = row["refresh_interval"]
+            if "tag_colors" in row: s["tag_colors"] = row["tag_colors"]
+            if "default_period" in row: s["default_period"] = row["default_period"]
     except Exception:
         pass
-    st.session_state.settings = {"refresh_interval": 60, "tag_colors": {}}
-    return st.session_state.settings
+        
+    st.session_state.settings = s
+    return s
 
 def save_settings(settings):
     st.session_state.settings = settings
+    # 1. 存入本機 JSON 以防 Supabase schema 未開新欄位
+    try:
+        import json
+        with open("settings.json", "w", encoding="utf-8") as f:
+             json.dump(settings, f)
+    except Exception:
+        pass
+
+    # 2. 寫回 Supabase
     try:
         sb = get_supabase()
-        sb.table("settings").update({
-            "refresh_interval": settings.get("refresh_interval", 60),
-            "tag_colors": settings.get("tag_colors", {}),
-        }).eq("id", 1).execute()
+        try:
+            sb.table("settings").update({
+                "refresh_interval": settings.get("refresh_interval", 60),
+                "tag_colors": settings.get("tag_colors", {}),
+                "default_period": settings.get("default_period", "1M"),
+            }).eq("id", 1).execute()
+        except:
+            sb.table("settings").update({
+                "refresh_interval": settings.get("refresh_interval", 60),
+                "tag_colors": settings.get("tag_colors", {}),
+            }).eq("id", 1).execute()
     except Exception:
         pass
 
@@ -187,7 +215,15 @@ st.markdown("""
     a.crypto-link { color: #4da6ff; text-decoration: none; font-size: 0.9rem; margin-right: 15px; }
     a.crypto-link:hover { text-decoration: underline; }
     
-    .holding-profit { font-size: 1.1rem; font-weight: bold; margin-top: 10px; }
+    .holding-profit {
+        font-size: 1.0rem;
+        font-weight: bold;
+        margin-top: 10px;
+        margin-bottom: 5px;
+        background-color: rgba(255, 255, 255, 0.05);
+        padding: 8px 12px;
+        border-radius: 6px;
+    }
     
     .tag-badge {
         display: inline-block;
@@ -263,6 +299,29 @@ st.markdown("""
         padding: 0 !important;
         opacity: 0.85 !important;
         white-space: nowrap !important;
+    }
+    
+    /* ===== 固定左下角 Clear Filters 按鈕 ===== */
+    div[data-testid="stElementContainer"]:has(.clear-filter-marker) {
+        display: none !important;
+    }
+    div[data-testid="stElementContainer"]:has(.clear-filter-marker) + div[data-testid="stElementContainer"] {
+        position: fixed !important;
+        bottom: 20px !important;
+        left: 20px !important;
+        z-index: 1000 !important;
+        width: calc(20vw - 40px) !important; /* Approximation for sidebar width minus padding */
+        min-width: 200px !important;
+        max-width: 300px !important;
+    }
+    div[data-testid="stElementContainer"]:has(.clear-filter-marker) + div[data-testid="stElementContainer"] button {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+        border: 1px solid #555 !important;
+        background-color: #222 !important;
+    }
+    div[data-testid="stElementContainer"]:has(.clear-filter-marker) + div[data-testid="stElementContainer"] button:hover {
+        background-color: #333 !important;
+        border-color: #777 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -448,8 +507,12 @@ def show_chart_dialog(ticker, period):
     else:
         st.warning("No data available for this period.")
         
+    # Ensure the widget key exists in session state before rendering to prevent warnings
+    if f"dialog_period_{ticker}_seg" not in st.session_state:
+        st.session_state[f"dialog_period_{ticker}_seg"] = current_p
+        
     st.markdown("---")
-    new_period = st.segmented_control("Chart Period", ["1D", "7D", "1M", "1Y", "ALL"], default=current_p, selection_mode="single", key=f"dialog_period_{ticker}_seg")
+    new_period = st.segmented_control("Chart Period", ["1D", "7D", "1M", "1Y", "ALL"], selection_mode="single", key=f"dialog_period_{ticker}_seg")
     if new_period and new_period != current_p:
         st.session_state[f"period_{ticker}_dialog"] = new_period
         st.session_state[f"period_{ticker}"] = new_period
@@ -549,7 +612,8 @@ def render_card(item, i, j):
     
     # Period selection setup
     if f"period_{ticker}" not in st.session_state:
-         st.session_state[f"period_{ticker}"] = "1M"
+         default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
+         st.session_state[f"period_{ticker}"] = default_p
     period = st.session_state[f"period_{ticker}"]
     
     with st.container(border=True):
@@ -575,7 +639,10 @@ def render_card(item, i, j):
         render_live_data(item, period)
         
         # Chart Controls and Links
-        new_period = st.segmented_control("Chart Period", ["1D", "7D", "1M", "1Y", "ALL"], key=f"period_{ticker}_seg", selection_mode="single", default=period, label_visibility="collapsed")
+        if f"period_{ticker}_seg" not in st.session_state:
+            st.session_state[f"period_{ticker}_seg"] = period
+            
+        new_period = st.segmented_control("Chart Period", ["1D", "7D", "1M", "1Y", "ALL"], key=f"period_{ticker}_seg", selection_mode="single", label_visibility="collapsed")
         if new_period and new_period != period:
              st.session_state[f"period_{ticker}"] = new_period
              st.rerun(scope="fragment")
@@ -700,14 +767,20 @@ def prefetch_ticker(args):
     else:
         get_usdtwd_rate()
 
+def prefetch_task(args, ctx):
+    add_script_run_ctx(ctx=ctx)
+    prefetch_ticker(args)
+
 # 阻塞等待所有預載完成，確保後續 Sidebar (總值計算) 和 Main UI (排序) 能全命中快取
 # 使用多線程瞬間抓取，避免主執行緒卡頓；加入超時避免單一 ticker 拖慢全部
 if all_needed_tickers:
     d_mode = st.session_state.display_mode
     s_pref = st.session_state.get('sort_pref', "")
-    prefetch_args = [(t, st.session_state.get(f"period_{t}", "1M"), d_mode, s_pref) for t in all_needed_tickers]
+    default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
+    prefetch_args = [(t, st.session_state.get(f"period_{t}", default_p), d_mode, s_pref) for t in all_needed_tickers]
+    ctx = get_script_run_ctx()
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {executor.submit(prefetch_ticker, args): args for args in prefetch_args}
+        futures = {executor.submit(prefetch_task, args, ctx): args for args in prefetch_args}
         concurrent.futures.wait(futures, timeout=15)
 
 # Sidebar: Group Management & Search
@@ -894,10 +967,7 @@ with st.sidebar:
     for t_val, t_cnt in sorted_tags:
         render_sidebar_tag(t_val, t_cnt)
         
-    if st.session_state.get('active_tag_filter'):
-        if st.button("✖️ Clear Tag Filter", use_container_width=True):
-            st.session_state.active_tag_filter = []
-            st.rerun()
+    # 個別 tag 的 Clear btn 移除，稍後統一處理
 
     st.markdown("---")
     
@@ -933,10 +1003,7 @@ with st.sidebar:
     if not_held_count > 0:
         render_holding_filter("未買進", not_held_count, "NOT_HELD")
 
-    if st.session_state.get('active_holding_filter'):
-        if st.button("✖️ Clear Status Filter", use_container_width=True):
-            st.session_state.active_holding_filter = []
-            st.rerun()
+    # 個別 status 的 Clear btn 移除，稍後統一處理
 
     st.markdown("---")
 
@@ -973,11 +1040,18 @@ with st.sidebar:
         if val > 0:
             render_rating_filter(s, val)
 
-    if st.session_state.get('active_rating_filter'):
-        if st.button("✖️ Clear Rating Filter", use_container_width=True):
+    # 個別 rating 的 Clear btn 移除，稍後統一處理
+            
+    # --- Consolidated Clear Filter Button ---
+    if st.session_state.get('active_tag_filter') or \
+       st.session_state.get('active_holding_filter') or \
+       st.session_state.get('active_rating_filter'):
+        st.markdown('<div class="clear-filter-marker"></div>', unsafe_allow_html=True)
+        if st.button("✖️ Clear Status Filter", use_container_width=True):
+            st.session_state.active_tag_filter = []
+            st.session_state.active_holding_filter = []
             st.session_state.active_rating_filter = []
             st.rerun()
-            
 # --- 前置設定 ---
 if 'refresh_interval' not in st.session_state:
     _sett = load_settings()
@@ -1009,6 +1083,9 @@ st.markdown('<div class="toolbar-marker"></div>', unsafe_allow_html=True)
 c_period, c_spacer, c_sort, c_disp, c_add, c_set = st.columns([0.25, 0.35, 0.2, 0.1, 0.05, 0.05], gap="small")
 
 with c_period:
+    if "global_period_ui" not in st.session_state:
+        st.session_state["global_period_ui"] = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
+        
     st.segmented_control("Global Chart Period", ["1D", "7D", "1M", "1Y", "ALL"], selection_mode="single", label_visibility="collapsed", key="global_period_ui", on_change=handle_global_period_change)
 
 with c_spacer:
@@ -1059,10 +1136,30 @@ with c_set:
             format_func=lambda x: "Off" if x == 0 else f"{x}s" if x < 60 else f"{x//60}m",
             index=[0, 30, 60, 300].index(st.session_state.get('refresh_interval', 60))
         )
+        
+        period_opts = ["1D", "7D", "1M", "1Y", "ALL"]
+        current_default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
+        new_default_period = st.selectbox(
+            "Default Chart Period",
+            options=period_opts,
+            index=period_opts.index(current_default_p) if current_default_p in period_opts else 2
+        )
+        
+        settings_changed = False
+        _s = load_settings()
+        
         if new_interval_val != st.session_state.refresh_interval:
             st.session_state.refresh_interval = new_interval_val
-            _s = load_settings()
             _s["refresh_interval"] = new_interval_val
+            settings_changed = True
+            
+        if new_default_period != current_default_p:
+            _s["default_period"] = new_default_period
+            if "settings" in st.session_state:
+                 st.session_state.settings["default_period"] = new_default_period
+            settings_changed = True
+            
+        if settings_changed:
             save_settings(_s)
             st.rerun()
             
