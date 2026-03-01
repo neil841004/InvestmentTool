@@ -11,6 +11,7 @@ def get_supabase() -> Client:
     key = st.secrets["supabase"]["key"]
     return create_client(url, key)
 
+@st.cache_data(ttl=3600)
 def load_stock_map():
     if os.path.exists(MAP_FILE):
         with open(MAP_FILE, "r", encoding="utf-8") as f:
@@ -53,10 +54,15 @@ def get_default_item(ticker):
         "tags": []
     }
 
+@st.cache_data(ttl=30)
 def load_watchlist():
     sb = get_supabase()
     response = sb.table("watchlist").select("*").order("display_order").order("id").execute()
     return response.data or []
+
+def invalidate_watchlist_cache():
+    """Call after any write operation to clear the watchlist cache."""
+    load_watchlist.clear()
 
 def save_watchlist(data):
     """批次 upsert 整個清單，並更新排序。"""
@@ -66,6 +72,7 @@ def save_watchlist(data):
         # 移除 Supabase 自動產生的欄位，避免衝突
         item.pop("created_at", None)
     sb.table("watchlist").upsert(data, on_conflict="ticker").execute()
+    invalidate_watchlist_cache()
 
 def add_ticker_to_watchlist(ticker):
     # Check if .TW needs to fallback to .TWO
@@ -95,11 +102,13 @@ def add_ticker_to_watchlist(ticker):
     new_item = get_default_item(ticker)
     new_item["display_order"] = next_order
     sb.table("watchlist").insert(new_item).execute()
+    invalidate_watchlist_cache()
     return True, f"Added {ticker}"
 
 def remove_ticker_from_watchlist(ticker):
     sb = get_supabase()
     sb.table("watchlist").delete().eq("ticker", ticker).execute()
+    invalidate_watchlist_cache()
 
 def update_ticker_data(ticker, note, rating,
                        yahoo_url="", tradingview_url="", avg_cost=0.0, shares=0.0, tags=None, custom_name=""):
@@ -117,9 +126,11 @@ def update_ticker_data(ticker, note, rating,
         "tags": tags,
         "holding": avg_cost > 0 and shares > 0,
     }).eq("ticker", ticker).execute()
+    invalidate_watchlist_cache()
 
 def save_item_order(ordered_items):
     """更新每個 ticker 的 display_order。"""
     sb = get_supabase()
     for i, item in enumerate(ordered_items):
         sb.table("watchlist").update({"display_order": i}).eq("ticker", item["ticker"]).execute()
+    invalidate_watchlist_cache()

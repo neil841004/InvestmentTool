@@ -369,18 +369,25 @@ def render_live_data(item, period):
                 line_color = '#FF3D00' if change >= 0 else '#00C853'
                 chart_img = create_sparkline(history_list, color=line_color)
                 
-    st.markdown(price_html, unsafe_allow_html=True)
-    
+    # Build all HTML in one pass to minimize st.markdown calls
+    combined_html = price_html
+
     if chart_img:
-        st.markdown('<span class="zoom-btn-anchor"></span>', unsafe_allow_html=True)
-        if st.button("🔍", key=f"zoom_{ticker}"):
-             show_chart_dialog(ticker, period)
-        st.image(chart_img, use_container_width=True)
-        
+        combined_html += '<span class="zoom-btn-anchor"></span>'
+
     val, p_pct = calculate_holding_profit(item, live_p)
+    holding_html = ""
     if val is not None:
         p_color = "change-pos" if p_pct >= 0 else "change-neg"
-        st.markdown(f"<div class='holding-profit'>Total Value: <span class='{p_color}'>{curr_sym}{val:,.2f} ({p_pct:+.2f}%)</span></div>", unsafe_allow_html=True)
+        holding_html = f"<div class='holding-profit'>Total Value: <span class='{p_color}'>{curr_sym}{val:,.2f} ({p_pct:+.2f}%)</span></div>"
+
+    if chart_img:
+        st.markdown(combined_html, unsafe_allow_html=True)
+        if st.button("🔍", key=f"zoom_{ticker}"):
+             show_chart_dialog(ticker, period)
+        st.markdown(chart_img + holding_html, unsafe_allow_html=True)
+    else:
+        st.markdown(combined_html + holding_html, unsafe_allow_html=True)
         
 @st.dialog("Chart Explorer", width="large")
 def show_chart_dialog(ticker, period):
@@ -424,9 +431,9 @@ def render_edit_popover(item, key_prefix):
                 n_avg = st.number_input("Avg Cost", value=float(item.get('avg_cost',0.0)), step=0.1)
             with c_sh:
                 n_sh = st.number_input("Shares/Qty", value=float(item.get('shares',0.0)), step=0.00001, format="%.5f")
-            # Collect all existing tags from all items for suggestions
+            # Collect all existing tags from cached data for suggestions
             all_existing_tags = set()
-            for other_item in wm.load_watchlist():
+            for other_item in data:
                 for t in other_item.get('tags', []):
                     all_existing_tags.add(t)
             
@@ -511,9 +518,15 @@ def render_card(item, i, j):
         c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
         with c1:
             display_name = wm.get_display_name(ticker, item_data=item)
-            st.markdown(f"<div style='border-left: 4px solid {mcolor}; padding-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'><span style='font-weight:bold; font-size:1.6rem; color:white;'>{display_name}</span> <span style='font-size:0.9rem;color:grey;'>{ticker}</span></div>", unsafe_allow_html=True)
-            st.markdown(render_stars(item.get('rating', 0)), unsafe_allow_html=True)
-            st.markdown(render_tags_html(item.get('tags', [])), unsafe_allow_html=True)
+            stars_html = render_stars(item.get('rating', 0))
+            tags_html = render_tags_html(item.get('tags', []))
+            st.markdown(
+                f"<div style='border-left: 4px solid {mcolor}; padding-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>"
+                f"<span style='font-weight:bold; font-size:1.6rem; color:white;'>{display_name}</span> "
+                f"<span style='font-size:0.9rem;color:grey;'>{ticker}</span></div>"
+                f"{stars_html}{tags_html}",
+                unsafe_allow_html=True
+            )
         with c2:
             render_note_popover(item, f"card_{i}_{j}")
         with c3:
@@ -574,12 +587,11 @@ def render_list_item(item):
     cc[4].markdown(f"<div style='margin-top:5px;'>{rating_str}</div>", unsafe_allow_html=True)
     cc[5].markdown(f"<div style='margin-top:4px;'>{tags_html}</div>", unsafe_allow_html=True)
     with cc[6]:
-        # Swapped order here too compared to previously
         c_p1, c_p2 = st.columns(2)
         with c_p1:
-            render_note_popover(item, "list")
+            render_note_popover(item, f"list_{ticker}")
         with c_p2:
-            render_edit_popover(item, "list")
+            render_edit_popover(item, f"list_{ticker}")
     cc[7].markdown(links_html, unsafe_allow_html=True)
     st.markdown("<hr style='margin: 0.5em 0; border-color: #333;'>", unsafe_allow_html=True)
 
@@ -650,13 +662,14 @@ def prefetch_ticker(args):
         get_usdtwd_rate()
 
 # 阻塞等待所有預載完成，確保後續 Sidebar (總值計算) 和 Main UI (排序) 能全命中快取
-# 使用多線程瞬間抓取，避免主執行緒卡頓
+# 使用多線程瞬間抓取，避免主執行緒卡頓；加入超時避免單一 ticker 拖慢全部
 if all_needed_tickers:
     d_mode = st.session_state.display_mode
     s_pref = st.session_state.get('sort_pref', "")
     prefetch_args = [(t, st.session_state.get(f"period_{t}", "1M"), d_mode, s_pref) for t in all_needed_tickers]
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-        list(executor.map(prefetch_ticker, prefetch_args))
+        futures = {executor.submit(prefetch_ticker, args): args for args in prefetch_args}
+        concurrent.futures.wait(futures, timeout=15)
 
 # Sidebar: Group Management & Search
 with st.sidebar:
@@ -947,8 +960,7 @@ if st.session_state.refresh_interval > 0:
 def handle_global_period_change():
     gp = st.session_state.get("global_period_ui")
     if gp:
-        global_data = wm.load_watchlist()
-        for t in global_data:
+        for t in data:
             tick = t['ticker']
             st.session_state[f"period_{tick}"] = gp
             st.session_state[f"period_{tick}_seg"] = gp
@@ -978,18 +990,22 @@ with c_sort:
 with c_disp:
     disp_opts = ["Card View", "List View"]
     disp_fmt = {"Card View": "▦", "List View": "☰"}
-    selected_mode = st.segmented_control(
-        "Display Mode", 
-        disp_opts, 
-        format_func=lambda x: disp_fmt[x], 
-        selection_mode="single", 
-        default=st.session_state.display_mode, 
-        key="disp_mode_seg", 
-        label_visibility="collapsed"
+
+    def on_display_mode_change():
+        new_mode = st.session_state.get("disp_mode_seg")
+        if new_mode:
+            st.session_state.display_mode = new_mode
+
+    st.segmented_control(
+        "Display Mode",
+        disp_opts,
+        format_func=lambda x: disp_fmt[x],
+        selection_mode="single",
+        default=st.session_state.display_mode,
+        key="disp_mode_seg",
+        label_visibility="collapsed",
+        on_change=on_display_mode_change,
     )
-    if selected_mode and selected_mode != st.session_state.display_mode:
-        st.session_state.display_mode = selected_mode
-        st.rerun()
 
 with c_add:
     if st.button("➕", use_container_width=True, type="primary", help="Add Ticker"):

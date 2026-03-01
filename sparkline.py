@@ -1,30 +1,33 @@
-import matplotlib.pyplot as plt
-import io
-import base64
-import numpy as np
-
-def create_sparkline(data, color='blue'):
+def create_sparkline(data, color='blue', width=200, height=50):
     """
-    Generates a sparkline image from data.
-    Returns: base64 encoded image string.
+    Generates a sparkline as an inline SVG string (no matplotlib overhead).
+    Returns: SVG markup string for use with st.markdown(unsafe_allow_html=True).
     """
     if not data or len(data) < 2:
         return None
-        
-    # Setup plot without axes/margins
-    fig, ax = plt.subplots(figsize=(2, 0.5))
-    ax.set_axis_off()
-    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    
-    # Normalize color (matplotlib name or hex)
-    ax.plot(data, color=color, linewidth=2)
-    ax.fill_between(range(len(data)), data, min(data), color=color, alpha=0.1)
-    
-    # Save to buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', transparent=True, dpi=100)
-    plt.close(fig)
-    
-    # Encode
-    data_uri = base64.b64encode(buf.getvalue()).decode('utf-8')
-    return f"data:image/png;base64,{data_uri}"
+
+    n = len(data)
+    min_val = min(data)
+    max_val = max(data)
+    val_range = max_val - min_val if max_val != min_val else 1
+
+    # Build SVG polyline points
+    points = []
+    for i, v in enumerate(data):
+        x = (i / (n - 1)) * width
+        y = height - ((v - min_val) / val_range) * height
+        points.append(f"{x:.1f},{y:.1f}")
+    points_str = " ".join(points)
+
+    # Build fill polygon (close path along bottom)
+    fill_points = points_str + f" {width:.1f},{height} 0,{height}"
+
+    svg = (
+        f'<svg width="100%" viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg" style="display:block;">'
+        f'<polyline points="{fill_points}" fill="{color}" fill-opacity="0.1" stroke="none"/>'
+        f'<polyline points="{points_str}" fill="none" stroke="{color}" stroke-width="2" '
+        f'vector-effect="non-scaling-stroke"/>'
+        f'</svg>'
+    )
+    return svg
