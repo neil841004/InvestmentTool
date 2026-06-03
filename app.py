@@ -723,6 +723,10 @@ def add_ticker_dialog():
 
 # --- 主程式狀態寫入 ---
 data = wm.load_watchlist()
+connection_warning = wm.get_connection_warning()
+if connection_warning:
+    st.warning(connection_warning)
+
 # After loading check if migration happened
 if isinstance(data, dict):
     # This shouldn't happen unless app started before migration fully finished in background, fallback
@@ -1080,7 +1084,7 @@ def handle_global_period_change():
 
 # --- 主畫面佈局 ---
 st.markdown('<div class="toolbar-marker"></div>', unsafe_allow_html=True)
-c_period, c_spacer, c_sort, c_disp, c_add, c_set = st.columns([0.25, 0.35, 0.2, 0.1, 0.05, 0.05], gap="small")
+c_period, c_spacer, c_sort, c_disp, c_add, c_refresh, c_set = st.columns([0.25, 0.30, 0.2, 0.1, 0.05, 0.05, 0.05], gap="small")
 
 with c_period:
     if "global_period_ui" not in st.session_state:
@@ -1126,6 +1130,14 @@ with c_disp:
 with c_add:
     if st.button("➕", use_container_width=True, type="primary", help="Add Ticker"):
         add_ticker_dialog()
+
+with c_refresh:
+    if st.button("🔄", use_container_width=True, help="刷新所有標的價格與走勢"):
+        wm.reset_supabase_client()
+        wm.invalidate_watchlist_cache()
+        get_live_price.clear()
+        get_hist_data.clear()
+        st.rerun()
 
 with c_set:
     with st.popover("⚙️", use_container_width=True):
