@@ -997,7 +997,7 @@ def add_ticker_dialog():
 
 # --- 主程式狀態寫入 ---
 force_remote_watchlist = st.session_state.pop("force_remote_watchlist", False)
-data = wm.load_watchlist(force_remote=force_remote_watchlist)
+data = wm.load_watchlist_from_remote() if force_remote_watchlist else wm.load_watchlist()
 connection_warning = wm.get_connection_warning()
 if connection_warning:
     st.warning(connection_warning)

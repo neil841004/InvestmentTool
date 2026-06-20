@@ -347,13 +347,17 @@ def get_default_item(ticker):
     }
 
 
-@st.cache_data(ttl=30)
-def load_watchlist(force_remote=False):
+def load_watchlist():
     local_data = _load_local_watchlist()
-    if local_data and not force_remote:
+    if local_data:
         clear_connection_warning()
         return local_data
 
+    return load_watchlist_from_remote()
+
+
+def load_watchlist_from_remote():
+    local_data = _load_local_watchlist()
     try:
         response = _execute_sheets("load_watchlist")
         items = response.get("items") or []
@@ -367,7 +371,10 @@ def load_watchlist(force_remote=False):
 
 def invalidate_watchlist_cache():
     """Call after any write operation to clear the watchlist cache."""
-    load_watchlist.clear()
+    for fn in (load_watchlist, load_watchlist_from_remote):
+        clear = getattr(fn, "clear", None)
+        if clear:
+            clear()
 
 
 def save_watchlist(data):
