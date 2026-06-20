@@ -318,7 +318,7 @@ st.markdown("""
         bottom: 20px !important;
         left: 20px !important;
         z-index: 1000 !important;
-        width: calc(20vw - 40px) !important; /* Approximation for sidebar width minus padding */
+        width: calc(20vw - 40px) !important;
         min-width: 200px !important;
         max-width: 300px !important;
     }
@@ -330,6 +330,43 @@ st.markdown("""
     div[data-testid="stElementContainer"]:has(.clear-filter-marker) + div[data-testid="stElementContainer"] button:hover {
         background-color: #333 !important;
         border-color: #777 !important;
+    }
+
+    /* ===== 底部分頁元件 ===== */
+    div[data-testid="stElementContainer"]:has(.pagination-marker) {
+        display: none !important;
+    }
+    div[data-testid="stElementContainer"]:has(.pagination-marker) + div[data-testid="stHorizontalBlock"] {
+        justify-content: center !important;
+        gap: 4px !important;
+        margin-top: 20px !important;
+        margin-bottom: 8px !important;
+        flex-wrap: nowrap !important;
+    }
+    div[data-testid="stElementContainer"]:has(.pagination-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+    div[data-testid="stElementContainer"]:has(.pagination-marker) + div[data-testid="stHorizontalBlock"] button {
+        min-width: 40px !important;
+        height: 38px !important;
+        padding: 0 12px !important;
+        border: 1px solid #444 !important;
+        border-radius: 6px !important;
+        background-color: #2a2a2a !important;
+        color: #ccc !important;
+        font-size: 0.9rem !important;
+        font-weight: 500 !important;
+        transition: background-color 0.15s, border-color 0.15s !important;
+    }
+    div[data-testid="stElementContainer"]:has(.pagination-marker) + div[data-testid="stHorizontalBlock"] button:hover {
+        background-color: #3a3a3a !important;
+        border-color: #666 !important;
+    }
+    div[data-testid="stElementContainer"]:has(.pagination-marker) + div[data-testid="stHorizontalBlock"] button:disabled {
+        opacity: 0.35 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1618,24 +1655,6 @@ else:
     main_container = st.empty()
     with main_container.container():
         if st.session_state.display_mode == "Card View":
-            if card_total_pages > 1:
-                p_prev, p_label, p_next = st.columns([0.12, 0.76, 0.12])
-                with p_prev:
-                    if st.button("Prev", disabled=card_page == 0, use_container_width=True):
-                        st.session_state.card_page = max(0, card_page - 1)
-                        st.rerun()
-                with p_label:
-                    st.markdown(
-                        f"<div style='text-align:center; color:#aaa; padding-top:0.35rem;'>"
-                        f"Cards {card_start + 1}-{card_end} of {len(current_items)} | Page {card_page + 1}/{card_total_pages}"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                with p_next:
-                    if st.button("Next", disabled=card_page >= card_total_pages - 1, use_container_width=True):
-                        st.session_state.card_page = min(card_total_pages - 1, card_page + 1)
-                        st.rerun()
-
             st.markdown('<div class="card-grid-marker"></div>', unsafe_allow_html=True)
             for i in range(0, len(card_items), 5):
                 chunk = card_items[i:i+5]
@@ -1643,6 +1662,78 @@ else:
                 for j, item in enumerate(chunk):
                     with cols[j]:
                          render_card(item, i, j)
+
+            # --- 底部分頁列 ---
+            if card_total_pages > 1:
+                def _build_page_numbers(current, total, wing=2):
+                    """產生頁碼列表，含省略號 (None 代表 '...')"""
+                    pages = []
+                    # 永遠顯示第 1 頁
+                    pages.append(1)
+                    # 計算 current 附近的區間
+                    left = max(2, current + 1 - wing)
+                    right = min(total - 1, current + 1 + wing)
+                    if left > 2:
+                        pages.append(None)  # 省略號
+                    for p in range(left, right + 1):
+                        pages.append(p)
+                    if right < total - 1:
+                        pages.append(None)  # 省略號
+                    # 永遠顯示最後一頁
+                    if total > 1:
+                        pages.append(total)
+                    return pages
+
+                page_numbers = _build_page_numbers(card_page, card_total_pages)
+
+                # 用 marker 標記分頁區塊，讓 CSS 能精準定位
+                st.markdown('<div class="pagination-marker"></div>', unsafe_allow_html=True)
+
+                # 建立欄位：◀ + 頁碼按鈕們 + ▶
+                num_page_slots = len(page_numbers)
+                # 箭頭欄寬度較窄，中間頁碼均分
+                col_specs = [0.08] + [1.0] * num_page_slots + [0.08]
+                pg_cols = st.columns(col_specs)
+
+                # 上一頁箭頭
+                with pg_cols[0]:
+                    if st.button("◀", disabled=card_page == 0, key="_pg_prev", use_container_width=True):
+                        st.session_state.card_page = max(0, card_page - 1)
+                        st.rerun()
+
+                # 頁碼按鈕
+                ellipsis_counter = 0
+                for idx, pn in enumerate(page_numbers):
+                    with pg_cols[idx + 1]:
+                        if pn is None:
+                            ellipsis_counter += 1
+                            st.markdown(
+                                f"<div style='text-align:center; color:#888; padding-top:6px; font-size:1rem; letter-spacing:2px; user-select:none;'>···</div>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            is_active = (pn - 1 == card_page)
+                            if is_active:
+                                # 當前頁：用 HTML 渲染成深青色背景的方塊
+                                st.markdown(
+                                    f"<div style='text-align:center;'>"
+                                    f"<span style='display:inline-flex;justify-content:center;align-items:center;"
+                                    f"min-width:36px;height:36px;padding:0 10px;"
+                                    f"background-color:#2a9d8f;color:#fff;border-radius:6px;"
+                                    f"font-weight:700;font-size:0.9rem;'>{pn}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                if st.button(str(pn), key=f"_pg_{pn}", use_container_width=True):
+                                    st.session_state.card_page = pn - 1
+                                    st.rerun()
+
+                # 下一頁箭頭
+                with pg_cols[-1]:
+                    if st.button("▶", disabled=card_page >= card_total_pages - 1, key="_pg_next", use_container_width=True):
+                        st.session_state.card_page = min(card_total_pages - 1, card_page + 1)
+                        st.rerun()
 
         else:
             # LIST VIEW
