@@ -1,5 +1,9 @@
 # InvestmentTool 接手筆記
 
+## 協作規範
+
+- 每次對話中只要有異動檔案，就將所有 Git local changes 一起進行 Git commit。
+
 ## 專案概覽
 
 這是一個 Streamlit 投資儀表板。主畫面會讀取 watchlist，抓取 yfinance 即時價格與歷史資料，並用卡片或列表顯示標的、評分、標籤、持倉成本、損益和外部連結。

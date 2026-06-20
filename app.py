@@ -1530,7 +1530,26 @@ else:
     prime_market_data_for_render(current_items, "List View")
 
 if not current_items:
-    st.info("Watchlist is empty in this group.")
+    filters_active = bool(
+        st.session_state.get('active_tag_filter')
+        or st.session_state.get('active_holding_filter')
+        or st.session_state.get('active_rating_filter')
+    )
+    if not data and connection_warning:
+        st.error(connection_warning)
+        st.caption("Open Streamlit Cloud app settings and verify the [google_sheets] web_app_url/token secrets.")
+    elif data and filters_active:
+        st.warning("No watchlist items match the active filters.")
+        if st.button("Clear filters", use_container_width=True):
+            st.session_state.active_tag_filter = []
+            st.session_state.active_holding_filter = []
+            st.session_state.active_rating_filter = []
+            st.rerun()
+    elif not data:
+        st.warning("Google Sheets returned no watchlist items.")
+        st.caption("Check that the Apps Script deployment is connected to the sheet tabs named targets and assets.")
+    else:
+        st.info("Watchlist is empty in this group.")
 else:
     main_container = st.empty()
     with main_container.container():

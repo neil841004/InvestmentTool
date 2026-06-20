@@ -27,9 +27,12 @@ def get_sheets_config():
     web_app_url = os.getenv("GOOGLE_SHEETS_WEB_APP_URL") or config.get("web_app_url")
     token = os.getenv("GOOGLE_SHEETS_TOKEN") or config.get("token")
     if not web_app_url or not token:
-        raise RuntimeError(
-            "Missing Google Sheets storage config. Set [google_sheets].web_app_url and token in .streamlit/secrets.toml."
+        message = (
+            "Missing Google Sheets storage config. Set [google_sheets].web_app_url and token "
+            "in Streamlit Cloud secrets."
         )
+        _set_connection_warning(message)
+        raise RuntimeError(message)
     return {"web_app_url": web_app_url, "token": token}
 
 
@@ -360,12 +363,26 @@ def load_watchlist_from_remote():
     local_data = _load_local_watchlist()
     try:
         response = _execute_sheets("load_watchlist")
-        items = response.get("items") or []
-        normalized = [_normalize_item(item) for item in items if item.get("ticker")]
+        items = response.get("items")
+        if items is None:
+            items = response.get("watchlist") or response.get("data") or []
+        if not isinstance(items, list):
+            raise RuntimeError(f"Google Sheets returned invalid watchlist payload: {type(items).__name__}")
+        normalized = [
+            _normalize_item(item)
+            for item in items
+            if isinstance(item, dict) and item.get("ticker")
+        ]
         if normalized:
             _save_local_watchlist(normalized)
+        elif not local_data:
+            _set_connection_warning(
+                "Google Sheets returned 0 watchlist items. Check that the deployed Streamlit secrets point to the Apps Script connected to the sheet with targets/assets data."
+            )
         return normalized
-    except Exception:
+    except Exception as exc:
+        if not local_data:
+            _set_connection_warning(f"Could not load Google Sheets watchlist: {type(exc).__name__}: {exc}")
         return local_data
 
 
