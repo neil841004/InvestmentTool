@@ -7,7 +7,6 @@ import hashlib
 import concurrent.futures
 import plotly.graph_objects as go
 import watchlist_manager as wm
-from watchlist_manager import get_supabase
 from sparkline import create_sparkline
 from streamlit_sortables import sort_items
 from streamlit_tags import st_tags
@@ -32,7 +31,7 @@ def load_settings():
 
     # 嘗試載入 Supabase 上的主設定
     try:
-        sb = get_supabase()
+        raise RuntimeError("Supabase storage disabled")
         response = sb.table("settings").select("*").eq("id", 1).execute()
         if response.data:
             row = response.data[0]
@@ -57,7 +56,7 @@ def save_settings(settings):
 
     # 2. 寫回 Supabase
     try:
-        sb = get_supabase()
+        raise RuntimeError("Supabase storage disabled")
         try:
             sb.table("settings").update({
                 "refresh_interval": settings.get("refresh_interval", 60),
@@ -73,6 +72,19 @@ def save_settings(settings):
         pass
 
 # --- 設定頁面 ---
+def load_settings():
+    if 'settings' in st.session_state:
+        return st.session_state.settings
+    settings = wm.load_settings()
+    st.session_state.settings = settings
+    return settings
+
+
+def save_settings(settings):
+    st.session_state.settings = settings
+    wm.save_settings(settings)
+
+
 st.set_page_config(layout="wide", page_title="Investment Dashboard v2", initial_sidebar_state="expanded")
 
 # --- 全域載入動畫 (Loading Spinner) ---

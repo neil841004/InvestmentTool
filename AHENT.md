@@ -13,6 +13,7 @@
 - `sparkline.py`：產生 inline SVG sparkline。
 - `tw_stock_map.json` / `us_stock_map.json`：新增標的搜尋用的代號對照表。
 - `migrate_to_supabase.py`：把本地 JSON 匯入 Supabase 的一次性工具。
+- `backup_supabase_local.py`：把 Supabase 的 `watchlist`、`settings` 拉回本機 SQLite 表格備份。
 - `check_data.py`：快速測試 yfinance 是否能抓資料。
 - `test_sort.py`：streamlit-sortables 的小型測試頁。
 - `DEPLOYMENT_GUIDE.md`：部署與 Supabase 遷移筆記，但目前部分中文內容已出現 mojibake，修改時要小心編碼。
@@ -57,6 +58,28 @@
 - 工具列刷新按鈕會同步清掉 yfinance cache、watchlist cache 和 Supabase client cache。
 
 如果雲端仍持續出現連線錯誤，優先檢查 Streamlit Cloud secrets、Supabase 專案狀態、Supabase API URL/anon key，以及 Streamlit Cloud logs 裡的實際例外。
+
+## 本地 SQLite 備份
+
+可以從 Supabase 拉資料到本機 SQLite：
+
+```powershell
+python backup_supabase_local.py
+```
+
+Windows 一鍵備份可以直接雙擊：
+
+```powershell
+backup_local.bat
+```
+
+預設會建立 `local_backups/investmenttool_backup.sqlite`，包含：
+
+- `watchlist`：目前雲端 watchlist 的完整快照。
+- `settings`：目前雲端 settings 的完整快照。
+- `backup_runs`：每次備份時間、來源 URL 和筆數紀錄。
+
+備份檔與 `local_backups/` 已加入 `.gitignore`，不要提交。當 Supabase 讀取失敗時，app 的 watchlist 備援順序是 SQLite 備份優先，其次才是舊的 `watchlist.json`。
 
 ## 開發注意事項
 

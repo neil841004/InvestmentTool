@@ -18,6 +18,12 @@ ENV/
 # --- 個人投資資料（含持倉成本等敏感資訊）---
 watchlist.json
 settings.json
+local_backups/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-*
 
 # --- 資料遷移腳本（含明文金鑰，本地用完即刪）---
 migrate_to_supabase.py
