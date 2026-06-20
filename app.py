@@ -1019,6 +1019,9 @@ if 'active_holding_filter' not in st.session_state or not isinstance(st.session_
 if 'active_rating_filter' not in st.session_state or not isinstance(st.session_state.active_rating_filter, list):
     st.session_state.active_rating_filter = []
 
+if 'active_type_filter' not in st.session_state or not isinstance(st.session_state.active_type_filter, list):
+    st.session_state.active_type_filter = []
+
 # 確保 settings 已經載入
 _ = load_settings()
 
@@ -1070,6 +1073,58 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     
+    st.markdown("---")
+    
+    # --- Market Type Filter ---
+    st.header("🌐 類型")
+    type_counts = {"tw": 0, "us": 0, "crypto": 0}
+    type_labels = {"tw": "🇹🇼 台股", "us": "🇺🇸 美股", "crypto": "🪙 加密貨幣"}
+    type_colors = {"tw": "#00C853", "us": "#FF3D00", "crypto": "#FFD600"}
+    for item in data:
+        mtype = get_market_type(item['ticker'])
+        if mtype in type_counts:
+            type_counts[mtype] += 1
+
+    # 類型篩選按鈕 CSS
+    type_filter_styles = ""
+    for mtype_key, mtype_color in type_colors.items():
+        css_cls = f"type-btn-{mtype_key}"
+        type_filter_styles += f"""
+        div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button {{
+            background-color: {mtype_color} !important;
+            border-color: rgba(255,255,255,0.2) !important;
+            color: {'white' if mtype_key != 'crypto' else '#1E1E1E'} !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            padding-left: 15px !important;
+            padding-right: 15px !important;
+        }}
+        div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button:hover {{
+            filter: brightness(1.2) !important;
+            border-color: rgba(255,255,255,0.5) !important;
+        }}
+        """
+    st.markdown(f"<style>{type_filter_styles}</style>", unsafe_allow_html=True)
+
+    def render_type_filter(mtype_key, label, count):
+        is_active = mtype_key in st.session_state.get('active_type_filter', [])
+        eye_icon = "👁️" if is_active else "👁‍🗨"
+        css_class = f"type-btn-{mtype_key}"
+        if is_active:
+            css_class += " tag-active"
+        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+        btn_label = f"{eye_icon} {label}  `{count}`"
+        if st.button(btn_label, key=f"filter_type_{mtype_key}", use_container_width=True):
+            if mtype_key in st.session_state.active_type_filter:
+                st.session_state.active_type_filter.remove(mtype_key)
+            else:
+                st.session_state.active_type_filter.append(mtype_key)
+            st.rerun()
+
+    for mtype_key in ["tw", "us", "crypto"]:
+        if type_counts[mtype_key] > 0:
+            render_type_filter(mtype_key, type_labels[mtype_key], type_counts[mtype_key])
+
     st.markdown("---")
     
     tag_counts = {}
@@ -1289,11 +1344,13 @@ with st.sidebar:
     # 個別 rating 的 Clear btn 移除，稍後統一處理
             
     # --- Consolidated Clear Filter Button ---
-    if st.session_state.get('active_tag_filter') or \
+    if st.session_state.get('active_type_filter') or \
+       st.session_state.get('active_tag_filter') or \
        st.session_state.get('active_holding_filter') or \
        st.session_state.get('active_rating_filter'):
         st.markdown('<div class="clear-filter-marker"></div>', unsafe_allow_html=True)
         if st.button("✖️ Clear Status Filter", use_container_width=True):
+            st.session_state.active_type_filter = []
             st.session_state.active_tag_filter = []
             st.session_state.active_holding_filter = []
             st.session_state.active_rating_filter = []
@@ -1457,6 +1514,13 @@ def apply_sort(items, method):
 
 def apply_filters(items):
     filtered = list(items)
+
+    if st.session_state.active_type_filter:
+        active_types = st.session_state.active_type_filter
+        filtered = [
+            item for item in filtered
+            if get_market_type(item['ticker']) in active_types
+        ]
 
     if st.session_state.active_tag_filter:
         active_tags = st.session_state.active_tag_filter
