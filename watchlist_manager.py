@@ -3,14 +3,18 @@ import os
 import sqlite3
 import time
 import urllib.request
+from datetime import datetime, timezone
 
 import streamlit as st
 
 MAP_FILE = "tw_stock_map.json"
 WATCHLIST_FILE = "watchlist.json"
 LOCAL_BACKUP_DB = os.path.join("local_backups", "investmenttool_backup.sqlite")
-SHEETS_RETRIES = 2
+SHEETS_RETRIES = 1
+SHEETS_TIMEOUT_SECONDS = 8
+SHEETS_BACKOFF_SECONDS = 120
 SHEETS_STATUS_KEY = "_sheets_connection_warning"
+_SHEETS_BACKOFF_UNTIL = 0
 
 
 @st.cache_resource
@@ -63,6 +67,13 @@ def get_connection_warning():
 
 
 def _execute_sheets(action, payload=None):
+    global _SHEETS_BACKOFF_UNTIL
+
+    is_read_action = action in {"load_watchlist", "load_settings"}
+    now = time.time()
+    if is_read_action and now < _SHEETS_BACKOFF_UNTIL:
+        raise RuntimeError("Google Sheets storage is in temporary backoff; using local backup.")
+
     config = get_sheets_config()
     body = {"action": action, "token": config["token"]}
     if payload:
@@ -79,12 +90,13 @@ def _execute_sheets(action, payload=None):
                 headers={"Content-Type": "application/json; charset=utf-8"},
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urllib.request.urlopen(request, timeout=SHEETS_TIMEOUT_SECONDS) as response:
                 raw = response.read().decode("utf-8")
             result = json.loads(raw)
             if not result.get("ok"):
                 raise RuntimeError(result.get("error") or raw)
             clear_connection_warning()
+            _SHEETS_BACKOFF_UNTIL = 0
             return result
         except Exception as exc:
             last_error = exc
@@ -93,6 +105,8 @@ def _execute_sheets(action, payload=None):
                 time.sleep(0.5 * (attempt + 1))
 
     print(f"Google Sheets action '{action}' failed after retry: {type(last_error).__name__}: {last_error}")
+    if is_read_action:
+        _SHEETS_BACKOFF_UNTIL = time.time() + SHEETS_BACKOFF_SECONDS
     _set_connection_warning(
         "Google Sheets storage is temporarily unavailable. Showing the latest local backup when possible."
     )
@@ -217,6 +231,76 @@ def _load_sqlite_watchlist():
         return []
 
 
+def _save_local_watchlist(data):
+    try:
+        os.makedirs(os.path.dirname(LOCAL_BACKUP_DB), exist_ok=True)
+        backed_up_at = datetime.now(timezone.utc).isoformat()
+        normalized = []
+        for i, item in enumerate(data):
+            clean_item = _normalize_item(item)
+            clean_item["display_order"] = i
+            if clean_item["ticker"]:
+                normalized.append(clean_item)
+
+        with sqlite3.connect(LOCAL_BACKUP_DB) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    id INTEGER,
+                    ticker TEXT PRIMARY KEY,
+                    custom_name TEXT DEFAULT '',
+                    note TEXT DEFAULT '',
+                    rating INTEGER DEFAULT 0,
+                    holding INTEGER DEFAULT 0,
+                    yahoo_url TEXT DEFAULT '',
+                    tradingview_url TEXT DEFAULT '',
+                    avg_cost REAL DEFAULT 0,
+                    shares REAL DEFAULT 0,
+                    tags TEXT DEFAULT '[]',
+                    display_order INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    raw_json TEXT NOT NULL,
+                    backed_up_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("DELETE FROM watchlist")
+            for i, item in enumerate(normalized, start=1):
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO watchlist (
+                        id, ticker, custom_name, note, rating, holding, yahoo_url,
+                        tradingview_url, avg_cost, shares, tags, display_order,
+                        created_at, raw_json, backed_up_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        i,
+                        item["ticker"],
+                        item.get("custom_name", ""),
+                        item.get("note", ""),
+                        item.get("rating", 0),
+                        1 if item.get("holding") else 0,
+                        item.get("yahoo_url", ""),
+                        item.get("tradingview_url", ""),
+                        item.get("avg_cost", 0.0),
+                        item.get("shares", 0.0),
+                        json.dumps(item.get("tags", []), ensure_ascii=False),
+                        item.get("display_order", i - 1),
+                        item.get("created_at", ""),
+                        json.dumps(item, ensure_ascii=False),
+                        backed_up_at,
+                    ),
+                )
+
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as exc:
+        print(f"local watchlist save failed: {type(exc).__name__}: {exc}")
+        return False
+
+
 @st.cache_data(ttl=3600)
 def load_stock_map():
     if os.path.exists(MAP_FILE):
@@ -264,13 +348,21 @@ def get_default_item(ticker):
 
 
 @st.cache_data(ttl=30)
-def load_watchlist():
+def load_watchlist(force_remote=False):
+    local_data = _load_local_watchlist()
+    if local_data and not force_remote:
+        clear_connection_warning()
+        return local_data
+
     try:
         response = _execute_sheets("load_watchlist")
         items = response.get("items") or []
-        return [_normalize_item(item) for item in items if item.get("ticker")]
+        normalized = [_normalize_item(item) for item in items if item.get("ticker")]
+        if normalized:
+            _save_local_watchlist(normalized)
+        return normalized
     except Exception:
-        return _load_local_watchlist()
+        return local_data
 
 
 def invalidate_watchlist_cache():
@@ -288,6 +380,7 @@ def save_watchlist(data):
             if clean_item["ticker"]:
                 normalized.append(clean_item)
         _execute_sheets("save_watchlist", {"items": normalized})
+        _save_local_watchlist(normalized)
         invalidate_watchlist_cache()
         return True
     except Exception:
@@ -392,6 +485,24 @@ def _default_settings():
     return {"refresh_interval": 60, "tag_colors": {}, "default_period": "1M"}
 
 
+def _load_local_settings():
+    try:
+        if os.path.exists("settings.json"):
+            with open("settings.json", "r", encoding="utf-8") as f:
+                local_settings = json.load(f)
+            settings = _default_settings()
+            settings.update(local_settings)
+            settings["refresh_interval"] = _coerce_int(settings.get("refresh_interval"), 60)
+            settings["tag_colors"] = _decode_json_field(settings.get("tag_colors"), {})
+            if not isinstance(settings["tag_colors"], dict):
+                settings["tag_colors"] = {}
+            settings["default_period"] = settings.get("default_period") or "1M"
+            return settings
+    except Exception:
+        pass
+    return None
+
+
 @st.cache_data(ttl=30)
 def load_settings_from_storage():
     response = _execute_sheets("load_settings")
@@ -406,20 +517,18 @@ def load_settings_from_storage():
     return merged
 
 
-def load_settings():
+def load_settings(force_remote=False):
+    local_settings = _load_local_settings()
+    if local_settings and not force_remote:
+        return local_settings
+
     try:
-        return load_settings_from_storage()
+        settings = load_settings_from_storage()
+        with open("settings.json", "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        return settings
     except Exception:
-        try:
-            if os.path.exists("settings.json"):
-                with open("settings.json", "r", encoding="utf-8") as f:
-                    local_settings = json.load(f)
-                settings = _default_settings()
-                settings.update(local_settings)
-                return settings
-        except Exception:
-            pass
-        return _default_settings()
+        return local_settings or _default_settings()
 
 
 def save_settings(settings):

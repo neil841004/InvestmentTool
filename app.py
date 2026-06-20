@@ -4,13 +4,9 @@ import pandas as pd
 import json
 import time
 import hashlib
-import concurrent.futures
 import plotly.graph_objects as go
 import watchlist_manager as wm
 from sparkline import create_sparkline
-from streamlit_sortables import sort_items
-from streamlit_tags import st_tags
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 # --- Settings Management ---
 
@@ -349,6 +345,15 @@ def get_market_color(mtype):
     if mtype == "us": return "#FF3D00"
     return "#FFD600"
 
+YAHOO_SYMBOL_OVERRIDES = {
+    "3184.TW": "3184.TWO",
+    "3293.TW": "3293.TWO",
+    "3491.TW": "3491.TWO",
+}
+
+def get_yahoo_symbol(ticker):
+    return YAHOO_SYMBOL_OVERRIDES.get(ticker, ticker)
+
 def get_default_urls(ticker):
     y_url = f"https://tw.stock.yahoo.com/quote/{ticker}"
     if ".TW" in ticker:
@@ -373,12 +378,107 @@ def get_hist_data(ticker, period):
         except:
             return pd.DataFrame()
             
-    df = fetch_hist(ticker)
-    if df.empty and ticker.endswith(".TW"):
+    yahoo_symbol = get_yahoo_symbol(ticker)
+    df = fetch_hist(yahoo_symbol)
+    if df.empty and ticker.endswith(".TW") and yahoo_symbol == ticker:
         # Fallback to .TWO
         df = fetch_hist(ticker.replace(".TW", ".TWO"))
         
     return df
+
+def _normalize_hist_frame(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.droplevel(0, axis=1)
+
+    if "Close" not in df.columns and "Adj Close" in df.columns:
+        df = df.copy()
+        df["Close"] = df["Adj Close"]
+
+    if "Close" not in df.columns:
+        return pd.DataFrame()
+
+    return df.dropna(subset=["Close"])
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_hist_data_batch(tickers, period):
+    tickers = tuple(dict.fromkeys(str(t).strip() for t in tickers if str(t).strip()))
+    if not tickers:
+        return {}
+
+    intervals = {'1D': '5m', '7D': '1h', '1M': '1d', '1Y': '1wk', 'ALL': '1mo'}
+    yf_period = {'1D': '1d', '7D': '5d', '1M': '1mo', '1Y': '1y', 'ALL': 'max'}[period]
+
+    results = {ticker: pd.DataFrame() for ticker in tickers}
+    download_map = {ticker: get_yahoo_symbol(ticker) for ticker in tickers}
+    download_symbols = tuple(dict.fromkeys(download_map.values()))
+    try:
+        raw = yf.download(
+            list(download_symbols),
+            period=yf_period,
+            interval=intervals[period],
+            group_by="ticker",
+            threads=True,
+            progress=False,
+            auto_adjust=False,
+        )
+    except Exception:
+        raw = pd.DataFrame()
+
+    if not raw.empty:
+        if len(download_symbols) == 1:
+            results[tickers[0]] = _normalize_hist_frame(raw)
+        elif isinstance(raw.columns, pd.MultiIndex):
+            level0 = set(raw.columns.get_level_values(0))
+            level1 = set(raw.columns.get_level_values(1))
+            for ticker in tickers:
+                yahoo_symbol = download_map[ticker]
+                try:
+                    if yahoo_symbol in level0:
+                        results[ticker] = _normalize_hist_frame(raw[yahoo_symbol])
+                    elif yahoo_symbol in level1:
+                        results[ticker] = _normalize_hist_frame(raw.xs(yahoo_symbol, axis=1, level=1))
+                except Exception:
+                    results[ticker] = pd.DataFrame()
+
+    fallback_map = {
+        ticker: ticker.replace(".TW", ".TWO")
+        for ticker in tickers
+        if ticker.endswith(".TW") and results[ticker].empty and download_map[ticker] == ticker
+    }
+    if fallback_map:
+        try:
+            fallback_raw = yf.download(
+                list(fallback_map.values()),
+                period=yf_period,
+                interval=intervals[period],
+                group_by="ticker",
+                threads=True,
+                progress=False,
+                auto_adjust=False,
+            )
+        except Exception:
+            fallback_raw = pd.DataFrame()
+
+        if not fallback_raw.empty:
+            if len(fallback_map) == 1:
+                original = next(iter(fallback_map))
+                results[original] = _normalize_hist_frame(fallback_raw)
+            elif isinstance(fallback_raw.columns, pd.MultiIndex):
+                level0 = set(fallback_raw.columns.get_level_values(0))
+                level1 = set(fallback_raw.columns.get_level_values(1))
+                for original, fallback in fallback_map.items():
+                    try:
+                        if fallback in level0:
+                            results[original] = _normalize_hist_frame(fallback_raw[fallback])
+                        elif fallback in level1:
+                            results[original] = _normalize_hist_frame(fallback_raw.xs(fallback, axis=1, level=1))
+                    except Exception:
+                        results[original] = pd.DataFrame()
+
+    return results
 
 @st.cache_data(ttl=60)
 def get_live_price(ticker):
@@ -389,8 +489,9 @@ def get_live_price(ticker):
         except:
             return None
             
-    price = fetch_price(ticker)
-    if price is None and ticker.endswith(".TW"):
+    yahoo_symbol = get_yahoo_symbol(ticker)
+    price = fetch_price(yahoo_symbol)
+    if price is None and ticker.endswith(".TW") and yahoo_symbol == ticker:
         # Fallback to .TWO
         price = fetch_price(ticker.replace(".TW", ".TWO"))
         
@@ -403,6 +504,64 @@ def get_usdtwd_rate():
         return t.fast_info.get('lastPrice', 32.0) or 32.0
     except:
         return 32.0
+
+_run_hist_cache = {}
+_run_price_cache = {}
+_run_usdtwd_rate = None
+CARD_PAGE_SIZE = 15
+
+def _latest_close(df):
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    close = df["Close"].dropna()
+    if close.empty:
+        return None
+    try:
+        return float(close.iloc[-1])
+    except Exception:
+        return None
+
+def _dedupe_tickers(tickers):
+    return tuple(sorted({str(t).strip() for t in tickers if str(t).strip()}))
+
+def prime_hist_data(tickers, period):
+    tickers = _dedupe_tickers(tickers)
+    missing = [ticker for ticker in tickers if (ticker, period) not in _run_hist_cache]
+    if not missing:
+        return
+
+    for ticker, df in get_hist_data_batch(tuple(missing), period).items():
+        _run_hist_cache[(ticker, period)] = df
+        price = _latest_close(df)
+        if price is not None:
+            _run_price_cache.setdefault(ticker, price)
+
+def get_cached_hist_data(ticker, period):
+    key = (ticker, period)
+    if key not in _run_hist_cache:
+        _run_hist_cache[key] = get_hist_data(ticker, period)
+    return _run_hist_cache[key]
+
+def get_cached_live_price(ticker, preferred_period=None):
+    if ticker in _run_price_cache:
+        return _run_price_cache[ticker]
+
+    periods = [preferred_period, "1D", "7D", "1M", "1Y", "ALL"]
+    for period in dict.fromkeys(period for period in periods if period):
+        price = _latest_close(_run_hist_cache.get((ticker, period)))
+        if price is not None:
+            _run_price_cache[ticker] = price
+            return price
+
+    price = get_live_price(ticker)
+    _run_price_cache[ticker] = price
+    return price
+
+def get_cached_usdtwd_rate():
+    global _run_usdtwd_rate
+    if _run_usdtwd_rate is None:
+        _run_usdtwd_rate = get_usdtwd_rate()
+    return _run_usdtwd_rate
 
 def calculate_holding_profit(item, live_price):
     avg_cost = item.get('avg_cost', 0.0)
@@ -455,8 +614,8 @@ def render_links(item):
 @st.fragment
 def render_live_data(item, period):
     ticker = item['ticker']
-    live_p = get_live_price(ticker)
-    hist = get_hist_data(ticker, period)
+    hist = get_cached_hist_data(ticker, period)
+    live_p = get_cached_live_price(ticker, preferred_period=period)
     curr_sym = "<span class='curr-sym'>NT$</span>" if get_market_type(ticker) == "tw" else "<span class='curr-sym'>US$</span>"
     
     price_html = "<div style='color:grey'>No Data</div>"
@@ -504,7 +663,7 @@ def show_chart_dialog(ticker, period):
     st.subheader(f"{ticker} - Chart")
     
     current_p = st.session_state.get(f"period_{ticker}_dialog", period)
-    df = get_hist_data(ticker, current_p)
+    df = get_cached_hist_data(ticker, current_p)
     if not df.empty:
         fig = go.Figure(data=go.Scatter(x=df.index, y=df['Close'], mode='lines', line=dict(color='#4da6ff')))
         fig.update_layout(
@@ -532,8 +691,106 @@ def show_chart_dialog(ticker, period):
         st.rerun()
 
 # --- Common UI Renderers ---
+def find_item_by_ticker(ticker):
+    return next((item for item in data if item.get("ticker") == ticker), None)
+
+def collect_tag_options(current_tags=None):
+    tags = set(current_tags or [])
+    for other_item in data:
+        tags.update(other_item.get("tags", []))
+    return sorted(t for t in tags if t)
+
+@st.dialog("Edit Ticker")
+def show_edit_dialog(ticker):
+    item = find_item_by_ticker(ticker)
+    if not item:
+        st.warning("Ticker is no longer in the watchlist.")
+        return
+
+    st.markdown(f"### Edit {ticker}")
+    with st.form(key=f"edit_dialog_form_{ticker}"):
+        n_custom = st.text_input("Custom Company Name", value=item.get("custom_name", ""))
+        n_rating = st.slider("Rating", 0, 5, item.get("rating", 0))
+
+        c_avg, c_sh = st.columns(2)
+        with c_avg:
+            n_avg = st.number_input("Avg Cost", value=float(item.get("avg_cost", 0.0)), step=0.1)
+        with c_sh:
+            n_sh = st.number_input("Shares/Qty", value=float(item.get("shares", 0.0)), step=0.00001, format="%.5f")
+
+        current_tags = item.get("tags", [])
+        c_m, c_new = st.columns([0.7, 0.3])
+        with c_m:
+            selected_tags = st.multiselect(
+                label="Select Tags",
+                options=collect_tag_options(current_tags),
+                default=current_tags,
+                key=f"edit_dialog_tags_{ticker}",
+            )
+        with c_new:
+            new_tag = st.text_input("Add New Tag", placeholder="Type & Save", key=f"edit_dialog_new_tag_{ticker}")
+
+        n_tags = list(selected_tags)
+        if new_tag and new_tag not in n_tags:
+            n_tags.append(new_tag)
+
+        n_yurl = st.text_input("Yahoo URL (Optional)", value=item.get("yahoo_url", ""))
+        n_tvurl = st.text_input("TradingView URL (Optional)", value=item.get("tradingview_url", ""))
+
+        c_save, c_del = st.columns([0.7, 0.3])
+        with c_save:
+            submitted = st.form_submit_button("Save", type="primary", use_container_width=True)
+        with c_del:
+            deleted = st.form_submit_button("Delete", use_container_width=True)
+
+    if submitted:
+        wm.update_ticker_data(
+            ticker, item.get("note", ""), n_rating,
+            n_yurl, n_tvurl, n_avg, n_sh, n_tags, n_custom
+        )
+        item.update({
+            "custom_name": n_custom,
+            "rating": n_rating,
+            "avg_cost": n_avg,
+            "shares": n_sh,
+            "tags": n_tags,
+            "yahoo_url": n_yurl,
+            "tradingview_url": n_tvurl,
+        })
+        st.rerun()
+
+    if deleted:
+        wm.remove_ticker_from_watchlist(ticker)
+        st.rerun()
+
+@st.dialog("Ticker Note")
+def show_note_dialog(ticker):
+    item = find_item_by_ticker(ticker)
+    if not item:
+        st.warning("Ticker is no longer in the watchlist.")
+        return
+
+    note_text = item.get("note", "")
+    with st.form(key=f"note_dialog_form_{ticker}"):
+        new_note = st.text_area("Note", value=note_text, height=300, key=f"note_dialog_area_{ticker}")
+        submitted = st.form_submit_button("Save", type="primary", use_container_width=True)
+
+    if submitted:
+        if new_note != note_text:
+            wm.update_ticker_data(
+                ticker, new_note, item.get("rating", 0),
+                item.get("yahoo_url", ""), item.get("tradingview_url", ""),
+                item.get("avg_cost", 0.0), item.get("shares", 0.0),
+                item.get("tags", []), item.get("custom_name", "")
+            )
+            item["note"] = new_note
+        st.rerun()
+
 def render_edit_popover(item, key_prefix):
     ticker = item['ticker']
+    if st.button("...", key=f"edit_btn_{key_prefix}_{ticker}", help=f"Edit {ticker}", use_container_width=True):
+        show_edit_dialog(ticker)
+    return
     with st.popover("⋮"):
         st.markdown(f"### Edit {ticker}")
         with st.form(key=f"form_{key_prefix}_{ticker}"):
@@ -602,6 +859,11 @@ def render_edit_popover(item, key_prefix):
 def render_note_popover(item, key_prefix):
     ticker = item['ticker']
     note_text = item.get('note', '')
+    label = "N*" if note_text.strip() else "N"
+    if st.button(label, key=f"note_btn_{key_prefix}_{ticker}", help=note_text if note_text else "Add note", use_container_width=True):
+        show_note_dialog(ticker)
+    return
+    note_text = item.get('note', '')
     icon = "📝" if note_text.strip() else "🖊️"
     
     with st.popover(icon, help=note_text if note_text else "Add note"):
@@ -665,8 +927,8 @@ def render_card(item, i, j):
 def render_list_item(item):
     ticker = item['ticker']
     name = wm.get_display_name(ticker, item_data=item)
-    live_p = get_live_price(ticker)
-    hist = get_hist_data(ticker, "1D")
+    hist = get_cached_hist_data(ticker, "1D")
+    live_p = get_cached_live_price(ticker, preferred_period="1D")
     curr_sym = "<span class='curr-sym'>NT$</span>" if get_market_type(ticker) == "tw" else "<span class='curr-sym'>US$</span>"
     
     # Formats
@@ -734,7 +996,8 @@ def add_ticker_dialog():
 # 移除 Reorder 對話框，改用下拉選單排序 (見主程式區)
 
 # --- 主程式狀態寫入 ---
-data = wm.load_watchlist()
+force_remote_watchlist = st.session_state.pop("force_remote_watchlist", False)
+data = wm.load_watchlist(force_remote=force_remote_watchlist)
 connection_warning = wm.get_connection_warning()
 if connection_warning:
     st.warning(connection_warning)
@@ -759,56 +1022,23 @@ if 'active_rating_filter' not in st.session_state or not isinstance(st.session_s
 # 確保 settings 已經載入
 _ = load_settings()
 
-# --- Prefetch Data ---
-# To optimize load times, fetch live prices and history concurrently for needed tickers
-all_needed_tickers = set()
-all_needed_tickers.add("USDTWD=X")
-
-for item in data:
-    all_needed_tickers.add(item['ticker'])
-
-def prefetch_ticker(args):
-    t, period, d_mode, sort_pref = args
-    if t != "USDTWD=X":
-        get_live_price(t)
-        get_hist_data(t, period) # Fetch history for current selected period
-        if d_mode == "List View":
-            get_hist_data(t, "1D")
-            
-        # Ensure sorting history is prefetched
-        if sort_pref and "Change" in sort_pref:
-            sort_period = "1D" if "1D" in sort_pref else "1M"
-            get_hist_data(t, sort_period)
-            
-    else:
-        get_usdtwd_rate()
-
-def prefetch_task(args, ctx):
-    add_script_run_ctx(ctx=ctx)
-    prefetch_ticker(args)
-
-# 阻塞等待所有預載完成，確保後續 Sidebar (總值計算) 和 Main UI (排序) 能全命中快取
-# 使用多線程瞬間抓取，避免主執行緒卡頓；加入超時避免單一 ticker 拖慢全部
-if all_needed_tickers:
-    d_mode = st.session_state.display_mode
-    s_pref = st.session_state.get('sort_pref', "")
-    default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
-    prefetch_args = [(t, st.session_state.get(f"period_{t}", default_p), d_mode, s_pref) for t in all_needed_tickers]
-    ctx = get_script_run_ctx()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {executor.submit(prefetch_task, args, ctx): args for args in prefetch_args}
-        concurrent.futures.wait(futures, timeout=15)
-
 # Sidebar: Group Management & Search
+summary_tickers = [
+    item["ticker"]
+    for item in data
+    if item.get("avg_cost", 0.0) > 0 and item.get("shares", 0.0) > 0
+]
+prime_hist_data(summary_tickers, "1D")
+
 with st.sidebar:
     st.header(" Portfolio Summary")
     
     total_cost = 0.0
     total_value = 0.0
-    usdtwd = get_usdtwd_rate()
+    usdtwd = get_cached_usdtwd_rate()
     
     for item in data:
-        live_p = get_live_price(item['ticker'])
+        live_p = get_cached_live_price(item['ticker'], preferred_period="1D")
         avg_cost = item.get('avg_cost', 0.0)
         shares = item.get('shares', 0.0)
         if avg_cost > 0 and shares > 0 and live_p is not None:
@@ -1117,7 +1347,9 @@ with c_sort:
         "Total Value (High > Low)", 
         "Rating (High > Low)"
     ]
-    st.session_state.sort_pref = st.selectbox("Sort", options=sort_opts, index=0, label_visibility="collapsed")
+    if "sort_pref" not in st.session_state or st.session_state.sort_pref not in sort_opts:
+        st.session_state.sort_pref = sort_opts[0]
+    st.selectbox("Sort", options=sort_opts, key="sort_pref", label_visibility="collapsed")
 
 with c_disp:
     disp_opts = ["Card View", "List View"]
@@ -1145,10 +1377,12 @@ with c_add:
 
 with c_refresh:
     if st.button("🔄", use_container_width=True, help="刷新所有標的價格與走勢"):
+        st.session_state.force_remote_watchlist = True
         wm.reset_supabase_client()
         wm.invalidate_watchlist_cache()
         get_live_price.clear()
         get_hist_data.clear()
+        get_hist_data_batch.clear()
         st.rerun()
 
 with c_set:
@@ -1189,8 +1423,6 @@ with c_set:
             
         st.caption("Press 'R' to refresh manually.")
 
-current_items = data
-
 # --- 排序邏輯 ---
 def apply_sort(items, method):
     if method == "Type (TW > US > Crypto)":
@@ -1203,8 +1435,8 @@ def apply_sort(items, method):
         reverse = "High > Low" in method
         
         def get_chg(t):
-            hp = get_live_price(t)
-            hd = get_hist_data(t, period)
+            hd = get_cached_hist_data(t, period)
+            hp = get_cached_live_price(t, preferred_period=period)
             if hp is not None and not hd.empty and len(hd) > 0:
                 return (hp - hd['Close'].iloc[0]) / hd['Close'].iloc[0]
             return -9999 if reverse else 9999
@@ -1212,40 +1444,90 @@ def apply_sort(items, method):
         return sorted(items, key=lambda x: get_chg(x['ticker']), reverse=reverse)
     elif method == "Total Value (High > Low)":
         def get_val(item):
-            lp = get_live_price(item['ticker'])
+            lp = get_cached_live_price(item['ticker'], preferred_period="1D")
             if lp is not None and item.get('avg_cost',0)>0 and item.get('shares',0)>0:
                 val = lp * item.get('shares',0)
                 # Normalize to TWD for sorting
                 if get_market_type(item['ticker']) in ["us", "crypto"]:
-                    val *= get_usdtwd_rate()
+                    val *= get_cached_usdtwd_rate()
                 return val
             return -1
         return sorted(items, key=get_val, reverse=True)
     return items
 
-current_items = apply_sort(current_items, st.session_state.get('sort_pref', "Type (TW > US > Crypto)"))
+def apply_filters(items):
+    filtered = list(items)
 
-# 套用標籤過濾 (OR logic for tags)
-if st.session_state.active_tag_filter:
-    active_tags = st.session_state.active_tag_filter
-    current_items = [
-        item for item in current_items
-        if ("NO_TAG" in active_tags and not item.get('tags', [])) or any(t in active_tags for t in item.get('tags', []))
-    ]
+    if st.session_state.active_tag_filter:
+        active_tags = st.session_state.active_tag_filter
+        filtered = [
+            item for item in filtered
+            if ("NO_TAG" in active_tags and not item.get('tags', [])) or any(t in active_tags for t in item.get('tags', []))
+        ]
 
-# 套用 Holding 狀態過濾 (OR logic for holding)
-if st.session_state.active_holding_filter:
-    active_holdings = st.session_state.active_holding_filter
-    current_items = [
-        item for item in current_items
-        if ("HELD" in active_holdings and item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0) or
-           ("NOT_HELD" in active_holdings and not (item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0))
-    ]
+    if st.session_state.active_holding_filter:
+        active_holdings = st.session_state.active_holding_filter
+        filtered = [
+            item for item in filtered
+            if ("HELD" in active_holdings and item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0) or
+               ("NOT_HELD" in active_holdings and not (item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0))
+        ]
 
-# 套用評分過濾 (OR logic for ratings)
-if st.session_state.active_rating_filter:
-    active_ratings = st.session_state.active_rating_filter
-    current_items = [item for item in current_items if item.get('rating', 0) in active_ratings]
+    if st.session_state.active_rating_filter:
+        active_ratings = st.session_state.active_rating_filter
+        filtered = [item for item in filtered if item.get('rating', 0) in active_ratings]
+
+    return filtered
+
+def prime_market_data_for_sort(items, sort_method):
+    tickers = [item["ticker"] for item in items]
+
+    if "Change" in sort_method:
+        sort_period = "1D" if "1D" in sort_method else "1M"
+        prime_hist_data(tickers, sort_period)
+    elif sort_method == "Total Value (High > Low)":
+        prime_hist_data(tickers, "1D")
+
+def prime_market_data_for_render(items, display_mode):
+    tickers = [item["ticker"] for item in items]
+
+    if display_mode == "List View":
+        prime_hist_data(tickers, "1D")
+    else:
+        period_groups = {}
+        default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
+        for item in items:
+            ticker = item["ticker"]
+            period = st.session_state.get(f"period_{ticker}", default_p)
+            period_groups.setdefault(period, []).append(ticker)
+        for period, period_tickers in period_groups.items():
+            prime_hist_data(period_tickers, period)
+
+def get_card_page_items(items):
+    total_pages = max(1, (len(items) + CARD_PAGE_SIZE - 1) // CARD_PAGE_SIZE)
+    page = int(st.session_state.get("card_page", 0))
+    page = min(max(page, 0), total_pages - 1)
+    st.session_state.card_page = page
+
+    start = page * CARD_PAGE_SIZE
+    end = min(start + CARD_PAGE_SIZE, len(items))
+    return items[start:end], page, total_pages, start, end
+
+sort_method = st.session_state.get('sort_pref', "Type (TW > US > Crypto)")
+current_items = apply_filters(data)
+prime_market_data_for_sort(current_items, sort_method)
+current_items = apply_sort(current_items, sort_method)
+
+card_items = current_items
+card_page = 0
+card_total_pages = 1
+card_start = 0
+card_end = len(current_items)
+if st.session_state.display_mode == "Card View":
+    card_items, card_page, card_total_pages, card_start, card_end = get_card_page_items(current_items)
+    prime_market_data_for_render(card_items, "Card View")
+else:
+    prime_market_data_for_render(current_items, "List View")
 
 if not current_items:
     st.info("Watchlist is empty in this group.")
@@ -1253,9 +1535,27 @@ else:
     main_container = st.empty()
     with main_container.container():
         if st.session_state.display_mode == "Card View":
+            if card_total_pages > 1:
+                p_prev, p_label, p_next = st.columns([0.12, 0.76, 0.12])
+                with p_prev:
+                    if st.button("Prev", disabled=card_page == 0, use_container_width=True):
+                        st.session_state.card_page = max(0, card_page - 1)
+                        st.rerun()
+                with p_label:
+                    st.markdown(
+                        f"<div style='text-align:center; color:#aaa; padding-top:0.35rem;'>"
+                        f"Cards {card_start + 1}-{card_end} of {len(current_items)} | Page {card_page + 1}/{card_total_pages}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with p_next:
+                    if st.button("Next", disabled=card_page >= card_total_pages - 1, use_container_width=True):
+                        st.session_state.card_page = min(card_total_pages - 1, card_page + 1)
+                        st.rerun()
+
             st.markdown('<div class="card-grid-marker"></div>', unsafe_allow_html=True)
-            for i in range(0, len(current_items), 5):
-                chunk = current_items[i:i+5]
+            for i in range(0, len(card_items), 5):
+                chunk = card_items[i:i+5]
                 cols = st.columns(5)
                 for j, item in enumerate(chunk):
                     with cols[j]:
