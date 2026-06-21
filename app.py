@@ -1073,340 +1073,372 @@ summary_tickers = [
 prime_hist_data(summary_tickers, "1D")
 
 with st.sidebar:
-    st.header(" Portfolio Summary")
+    st.header("🧭 功能導覽")
+    if "nav_page" not in st.session_state:
+        st.session_state.nav_page = "📈 投資儀表板"
     
-    total_cost = 0.0
-    total_value = 0.0
-    cash_value = 0.0
-    profit_basis_value = 0.0
-    usdtwd = get_cached_usdtwd_rate()
-    
-    for item in data:
-        shares = item_shares(item)
-        if shares <= 0:
-            continue
-
-        if is_cash_ticker(item.get("ticker")):
-            cash_value += shares
-            total_value += shares
-            continue
-
-        live_p = get_cached_live_price(item['ticker'], preferred_period="1D")
-        avg_cost = _to_float(item.get('avg_cost', 0.0))
-        if live_p is not None:
-            item_cost = avg_cost * shares
-            item_value = live_p * shares
-            
-            # Convert to TWD (if it's US or Crypto)
-            if get_market_type(item['ticker']) in ["us", "crypto"]:
-                item_cost *= usdtwd
-                item_value *= usdtwd
-                
-            total_value += item_value
-            if avg_cost > 0:
-                total_cost += item_cost
-                profit_basis_value += item_value
-                
-    total_profit = profit_basis_value - total_cost
-    total_pct = (total_profit / total_cost * 100) if total_cost > 0 else 0
-    
-    p_color_val = "#FF3D00" if total_profit >= 0 else "#00C853"
-    sign_val = "+" if total_profit >= 0 else ""
-    
-    st.markdown(f"""
-    <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:4px solid {p_color_val};'>
-        <div style='color:grey; font-size:0.9rem;'>Total Value (NTD)</div>
-        <div style='font-size:1.8rem; font-weight:bold; color:white;'>NT${total_value:,.0f}</div>
-        <div style='color:#7DD3FC; font-size:0.85rem; margin-top:2px;'>持有現金: NT${cash_value:,.0f}</div>
-        <div style='color:grey; font-size:0.9rem; margin-top:10px;'>Total Profit</div>
-        <div style='font-size:1.2rem; font-weight:bold; color:{p_color_val};'>{sign_val}NT${total_profit:,.0f} ({sign_val}{total_pct:.2f}%)</div>
-        <div style='color:grey; font-size:0.8rem; margin-top:5px;'>Cost: NT${total_cost:,.0f}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    
+    st.session_state.nav_page = st.radio(
+        "導覽",
+        ["📈 投資儀表板", "📝 投資週報"],
+        index=0 if st.session_state.nav_page == "📈 投資儀表板" else 1,
+        label_visibility="collapsed"
+    )
     st.markdown("---")
     
-    # --- Market Type Filter ---
-    st.header("🌐 類型")
-    type_counts = {"tw": 0, "us": 0, "crypto": 0}
-    type_labels = {"tw": "🇹🇼 台股", "us": "🇺🇸 美股", "crypto": "🪙 加密貨幣"}
-    type_colors = {"tw": "#00C853", "us": "#FF3D00", "crypto": "#FFD600"}
-    for item in display_data:
-        mtype = get_market_type(item['ticker'])
-        if mtype in type_counts:
-            type_counts[mtype] += 1
-
-    # 類型篩選按鈕 CSS
-    type_filter_styles = ""
-    for mtype_key, mtype_color in type_colors.items():
-        css_cls = f"type-btn-{mtype_key}"
-        type_filter_styles += f"""
-        div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button {{
-            background-color: {mtype_color} !important;
-            border-color: rgba(255,255,255,0.2) !important;
-            color: {'#1E1E1E' if mtype_key == 'crypto' else 'white'} !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            padding-left: 15px !important;
-            padding-right: 15px !important;
-        }}
-        div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button:hover {{
-            filter: brightness(1.2) !important;
-            border-color: rgba(255,255,255,0.5) !important;
-        }}
-        """
-    st.markdown(f"<style>{type_filter_styles}</style>", unsafe_allow_html=True)
-
-    def render_type_filter(mtype_key, label, count):
-        is_active = mtype_key in st.session_state.get('active_type_filter', [])
-        eye_icon = "👁️" if is_active else "👁‍🗨"
-        css_class = f"type-btn-{mtype_key}"
-        if is_active:
-            css_class += " tag-active"
-        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
-        btn_label = f"{eye_icon} {label}  `{count}`"
-        if st.button(btn_label, key=f"filter_type_{mtype_key}", use_container_width=True):
-            if mtype_key in st.session_state.active_type_filter:
-                st.session_state.active_type_filter.remove(mtype_key)
-            else:
-                st.session_state.active_type_filter.append(mtype_key)
-            st.rerun()
-
-    for mtype_key in ["tw", "us", "crypto"]:
-        if type_counts[mtype_key] > 0:
-            render_type_filter(mtype_key, type_labels[mtype_key], type_counts[mtype_key])
-
-    st.markdown("---")
-    
-    tag_counts = {}
-    no_tag_count = 0
-    for item in display_data:
-        tags = item.get('tags', [])
-        if not tags:
-            no_tag_count += 1
+    if st.session_state.nav_page == "📝 投資週報":
+        st.header("📝 週報歷史記錄")
+        import os
+        reports_dir = "reports"
+        if not os.path.exists(reports_dir):
+            os.makedirs(reports_dir)
+        
+        report_files = [f for f in os.listdir(reports_dir) if f.startswith("report_") and f.endswith(".md")]
+        report_files.sort(reverse=True)
+        
+        if report_files:
+            display_names = [f"📅 {f.replace('report_', '').replace('.md', '')} 報告" for f in report_files]
+            selected_display = st.selectbox("選擇報告期數", display_names)
+            selected_index = display_names.index(selected_display)
+            st.session_state.selected_report_file = report_files[selected_index]
         else:
-            for t in tags:
-                tag_counts[t] = tag_counts.get(t, 0) + 1
-                
-    # Sort tags by count descending
-    sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+            st.warning("尚無生成任何報告。")
+            st.session_state.selected_report_file = None
+
+    if st.session_state.nav_page == "📈 投資儀表板":
+        st.header(" Portfolio Summary")
     
-    c_hdr, c_edit = st.columns([0.85, 0.15], vertical_alignment="bottom")
-    with c_hdr:
-        st.header("🏷️ Tags")
-    with c_edit:
-        with st.popover("🎨", help="自訂標籤顏色"):
-            st.markdown("**編輯標籤顏色**")
+        total_cost = 0.0
+        total_value = 0.0
+        cash_value = 0.0
+        profit_basis_value = 0.0
+        usdtwd = get_cached_usdtwd_rate()
+    
+        for item in data:
+            shares = item_shares(item)
+            if shares <= 0:
+                continue
+
+            if is_cash_ticker(item.get("ticker")):
+                cash_value += shares
+                total_value += shares
+                continue
+
+            live_p = get_cached_live_price(item['ticker'], preferred_period="1D")
+            avg_cost = _to_float(item.get('avg_cost', 0.0))
+            if live_p is not None:
+                item_cost = avg_cost * shares
+                item_value = live_p * shares
             
-            def update_tag_color(t_name):
-                new_c = st.session_state[f"global_cp_{t_name}"]
-                s = st.session_state.settings
-                if "tag_colors" not in s: s["tag_colors"] = {}
-                s["tag_colors"][t_name] = new_c
-                save_settings(s)
+                # Convert to TWD (if it's US or Crypto)
+                if get_market_type(item['ticker']) in ["us", "crypto"]:
+                    item_cost *= usdtwd
+                    item_value *= usdtwd
                 
-            for tag_name, _ in sorted_tags:
-                current_c = st.session_state.settings.get("tag_colors", {}).get(tag_name, get_tag_color(tag_name))
-                if "hsl" in current_c:
-                    current_c = "#888888" # Fallback
-                st.color_picker(tag_name, value=current_c, key=f"global_cp_{tag_name}", on_change=update_tag_color, args=(tag_name,))
+                total_value += item_value
+                if avg_cost > 0:
+                    total_cost += item_cost
+                    profit_basis_value += item_value
+                
+        total_profit = profit_basis_value - total_cost
+        total_pct = (total_profit / total_cost * 100) if total_cost > 0 else 0
     
-    # 預先收集所有用到的顏色的 CSS，注入一次即可
-    tag_styles = """
-    /* 隱藏所有的 marker 元件，不佔據任何空間避免產生錯誤的排版間距 */
-    div[data-testid="stElementContainer"]:has(.tag-marker) {
-        display: none !important;
-    }
+        p_color_val = "#FF3D00" if total_profit >= 0 else "#00C853"
+        sign_val = "+" if total_profit >= 0 else ""
+    
+        st.markdown(f"""
+        <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:4px solid {p_color_val};'>
+            <div style='color:grey; font-size:0.9rem;'>Total Value (NTD)</div>
+            <div style='font-size:1.8rem; font-weight:bold; color:white;'>NT${total_value:,.0f}</div>
+            <div style='color:#7DD3FC; font-size:0.85rem; margin-top:2px;'>持有現金: NT${cash_value:,.0f}</div>
+            <div style='color:grey; font-size:0.9rem; margin-top:10px;'>Total Profit</div>
+            <div style='font-size:1.2rem; font-weight:bold; color:{p_color_val};'>{sign_val}NT${total_profit:,.0f} ({sign_val}{total_pct:.2f}%)</div>
+            <div style='color:grey; font-size:0.8rem; margin-top:5px;'>Cost: NT${total_cost:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     
-    /* 讓被選取的 Tag 有明顯的發光亮框 */
-    div[data-testid="stElementContainer"]:has(.tag-active) + div[data-testid="stElementContainer"] button {
-        border: 2px solid white !important;
-        font-weight: bold !important;
-        box-shadow: 0 0 8px rgba(255,255,255,0.4);
-    }
-    """
+        st.markdown("---")
     
-    for tag_name, _ in sorted_tags:
-        bg_col = get_tag_color(tag_name)
-        c_name = "tag-btn-" + hashlib.md5(tag_name.encode()).hexdigest()
-        tag_styles += f"""
-        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button {{
-            background-color: {bg_col} !important;
+        # --- Market Type Filter ---
+        st.header("🌐 類型")
+        type_counts = {"tw": 0, "us": 0, "crypto": 0}
+        type_labels = {"tw": "🇹🇼 台股", "us": "🇺🇸 美股", "crypto": "🪙 加密貨幣"}
+        type_colors = {"tw": "#00C853", "us": "#FF3D00", "crypto": "#FFD600"}
+        for item in display_data:
+            mtype = get_market_type(item['ticker'])
+            if mtype in type_counts:
+                type_counts[mtype] += 1
+
+        # 類型篩選按鈕 CSS
+        type_filter_styles = ""
+        for mtype_key, mtype_color in type_colors.items():
+            css_cls = f"type-btn-{mtype_key}"
+            type_filter_styles += f"""
+            div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button {{
+                background-color: {mtype_color} !important;
+                border-color: rgba(255,255,255,0.2) !important;
+                color: {'#1E1E1E' if mtype_key == 'crypto' else 'white'} !important;
+                display: flex !important;
+                justify-content: space-between !important;
+                padding-left: 15px !important;
+                padding-right: 15px !important;
+            }}
+            div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button:hover {{
+                filter: brightness(1.2) !important;
+                border-color: rgba(255,255,255,0.5) !important;
+            }}
+            """
+        st.markdown(f"<style>{type_filter_styles}</style>", unsafe_allow_html=True)
+
+        def render_type_filter(mtype_key, label, count):
+            is_active = mtype_key in st.session_state.get('active_type_filter', [])
+            eye_icon = "👁️" if is_active else "👁‍🗨"
+            css_class = f"type-btn-{mtype_key}"
+            if is_active:
+                css_class += " tag-active"
+            st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+            btn_label = f"{eye_icon} {label}  `{count}`"
+            if st.button(btn_label, key=f"filter_type_{mtype_key}", use_container_width=True):
+                if mtype_key in st.session_state.active_type_filter:
+                    st.session_state.active_type_filter.remove(mtype_key)
+                else:
+                    st.session_state.active_type_filter.append(mtype_key)
+                st.rerun()
+
+        for mtype_key in ["tw", "us", "crypto"]:
+            if type_counts[mtype_key] > 0:
+                render_type_filter(mtype_key, type_labels[mtype_key], type_counts[mtype_key])
+
+        st.markdown("---")
+    
+        tag_counts = {}
+        no_tag_count = 0
+        for item in display_data:
+            tags = item.get('tags', [])
+            if not tags:
+                no_tag_count += 1
+            else:
+                for t in tags:
+                    tag_counts[t] = tag_counts.get(t, 0) + 1
+                
+        # Sort tags by count descending
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+    
+        c_hdr, c_edit = st.columns([0.85, 0.15], vertical_alignment="bottom")
+        with c_hdr:
+            st.header("🏷️ Tags")
+        with c_edit:
+            with st.popover("🎨", help="自訂標籤顏色"):
+                st.markdown("**編輯標籤顏色**")
+            
+                def update_tag_color(t_name):
+                    new_c = st.session_state[f"global_cp_{t_name}"]
+                    s = st.session_state.settings
+                    if "tag_colors" not in s: s["tag_colors"] = {}
+                    s["tag_colors"][t_name] = new_c
+                    save_settings(s)
+                
+                for tag_name, _ in sorted_tags:
+                    current_c = st.session_state.settings.get("tag_colors", {}).get(tag_name, get_tag_color(tag_name))
+                    if "hsl" in current_c:
+                        current_c = "#888888" # Fallback
+                    st.color_picker(tag_name, value=current_c, key=f"global_cp_{tag_name}", on_change=update_tag_color, args=(tag_name,))
+    
+        # 預先收集所有用到的顏色的 CSS，注入一次即可
+        tag_styles = """
+        /* 隱藏所有的 marker 元件，不佔據任何空間避免產生錯誤的排版間距 */
+        div[data-testid="stElementContainer"]:has(.tag-marker) {
+            display: none !important;
+        }
+    
+    
+        /* 讓被選取的 Tag 有明顯的發光亮框 */
+        div[data-testid="stElementContainer"]:has(.tag-active) + div[data-testid="stElementContainer"] button {
+            border: 2px solid white !important;
+            font-weight: bold !important;
+            box-shadow: 0 0 8px rgba(255,255,255,0.4);
+        }
+        """
+    
+        for tag_name, _ in sorted_tags:
+            bg_col = get_tag_color(tag_name)
+            c_name = "tag-btn-" + hashlib.md5(tag_name.encode()).hexdigest()
+            tag_styles += f"""
+            div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button {{
+                background-color: {bg_col} !important;
+                border-color: rgba(255,255,255,0.2) !important;
+                color: white !important;
+                display: flex !important;
+                justify-content: space-between !important;
+                padding-left: 15px !important;
+                padding-right: 15px !important;
+            }}
+            div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button:hover {{
+                filter: brightness(1.2) !important;
+                border-color: rgba(255,255,255,0.5) !important;
+            }}
+            """
+    
+        # 無標籤的樣式
+        tag_styles += """
+        div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button {
+            background-color: #444444 !important;
             border-color: rgba(255,255,255,0.2) !important;
             color: white !important;
             display: flex !important;
             justify-content: space-between !important;
             padding-left: 15px !important;
             padding-right: 15px !important;
-        }}
-        div[data-testid="stElementContainer"]:has(.{c_name}) + div[data-testid="stElementContainer"] button:hover {{
+        }
+        div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button:hover {
             filter: brightness(1.2) !important;
             border-color: rgba(255,255,255,0.5) !important;
+        }
+
+        /* Target the generic sidebar filter buttons (Holding and Rating) which use stElementContainer but don't have stHorizontalBlock */
+        div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button span,
+        div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button div[data-testid="stMarkdownContainer"] {{
+            width: 100% !important;
+        }}
+        div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p {{
+            display: flex !important;
+            width: 100% !important;
+            align-items: center !important;
+            gap: 0 !important;
+            margin: 0 !important;
+        }}
+        div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p code {{
+            margin-left: auto !important;
+            background: transparent !important;
+            border: none !important;
+            color: inherit !important;
+            font-size: 0.9em !important;
+            font-weight: bold !important;
+            padding: 0 !important;
+            opacity: 0.8 !important;
+            white-space: nowrap !important;
         }}
         """
     
-    # 無標籤的樣式
-    tag_styles += """
-    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button {
-        background-color: #444444 !important;
-        border-color: rgba(255,255,255,0.2) !important;
-        color: white !important;
-        display: flex !important;
-        justify-content: space-between !important;
-        padding-left: 15px !important;
-        padding-right: 15px !important;
-    }
-    div[data-testid="stElementContainer"]:has(.tag-btn-notag) + div[data-testid="stElementContainer"] button:hover {
-        filter: brightness(1.2) !important;
-        border-color: rgba(255,255,255,0.5) !important;
-    }
-
-    /* Target the generic sidebar filter buttons (Holding and Rating) which use stElementContainer but don't have stHorizontalBlock */
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button span,
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button div[data-testid="stMarkdownContainer"] {{
-        width: 100% !important;
-    }}
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p {{
-        display: flex !important;
-        width: 100% !important;
-        align-items: center !important;
-        gap: 0 !important;
-        margin: 0 !important;
-    }}
-    div[data-testid="stElementContainer"]:has(.tag-marker) + div[data-testid="stElementContainer"] button p code {{
-        margin-left: auto !important;
-        background: transparent !important;
-        border: none !important;
-        color: inherit !important;
-        font-size: 0.9em !important;
-        font-weight: bold !important;
-        padding: 0 !important;
-        opacity: 0.8 !important;
-        white-space: nowrap !important;
-    }}
-    """
+        st.markdown(f"<style>{tag_styles}</style>", unsafe_allow_html=True)
     
-    st.markdown(f"<style>{tag_styles}</style>", unsafe_allow_html=True)
+        def render_sidebar_tag(tag_name, count, is_no_tag=False):
+            bg_col = get_tag_color(tag_name) if not is_no_tag else "#555555"
+            is_active = tag_name in st.session_state.get('active_tag_filter', [])
+            if is_no_tag and "NO_TAG" in st.session_state.get('active_tag_filter', []):
+                is_active = True
+            
+            eye_icon = "👁️" if is_active else "👁‍🗨"
+            css_class = "tag-btn-notag" if is_no_tag else "tag-btn-" + hashlib.md5(tag_name.encode()).hexdigest()
+            if is_active:
+                css_class += " tag-active"
+            
+            # 魔法錨點：用於讓 CSS 精準上色，且不佔據空間
+            st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+        
+            btn_label = f"{eye_icon} {tag_name}  `{count}`" 
+            if st.button(btn_label, key=f"filter_tag_{tag_name}", use_container_width=True):
+                target = "NO_TAG" if is_no_tag else tag_name
+                if target in st.session_state.active_tag_filter:
+                    st.session_state.active_tag_filter.remove(target)
+                else:
+                    st.session_state.active_tag_filter.append(target)
+                st.rerun()
+
+        # 渲染「無標籤」
+        if no_tag_count > 0:
+            render_sidebar_tag("無標籤", no_tag_count, is_no_tag=True)
+        
+        for t_val, t_cnt in sorted_tags:
+            render_sidebar_tag(t_val, t_cnt)
+        
+        # 個別 tag 的 Clear btn 移除，稍後統一處理
+
+        st.markdown("---")
     
-    def render_sidebar_tag(tag_name, count, is_no_tag=False):
-        bg_col = get_tag_color(tag_name) if not is_no_tag else "#555555"
-        is_active = tag_name in st.session_state.get('active_tag_filter', [])
-        if is_no_tag and "NO_TAG" in st.session_state.get('active_tag_filter', []):
-            is_active = True
-            
-        eye_icon = "👁️" if is_active else "👁‍🗨"
-        css_class = "tag-btn-notag" if is_no_tag else "tag-btn-" + hashlib.md5(tag_name.encode()).hexdigest()
-        if is_active:
-            css_class += " tag-active"
-            
-        # 魔法錨點：用於讓 CSS 精準上色，且不佔據空間
-        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
-        
-        btn_label = f"{eye_icon} {tag_name}  `{count}`" 
-        if st.button(btn_label, key=f"filter_tag_{tag_name}", use_container_width=True):
-            target = "NO_TAG" if is_no_tag else tag_name
-            if target in st.session_state.active_tag_filter:
-                st.session_state.active_tag_filter.remove(target)
+        # --- Holding Status Filter ---
+        st.header("💼 狀態")
+        held_count = 0
+        not_held_count = 0
+        for item in display_data:
+            if is_held_item(item):
+                held_count += 1
             else:
-                st.session_state.active_tag_filter.append(target)
-            st.rerun()
+                not_held_count += 1
 
-    # 渲染「無標籤」
-    if no_tag_count > 0:
-        render_sidebar_tag("無標籤", no_tag_count, is_no_tag=True)
+        def render_holding_filter(status, count, filter_key):
+            is_active = filter_key in st.session_state.get('active_holding_filter', [])
+            eye_icon = "👁️" if is_active else "👁‍🗨"
+            css_class = "tag-btn-notag"
+            if is_active:
+                css_class += " tag-active"
         
-    for t_val, t_cnt in sorted_tags:
-        render_sidebar_tag(t_val, t_cnt)
+            st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
-    # 個別 tag 的 Clear btn 移除，稍後統一處理
+            btn_label = f"{eye_icon} {status}  `{count}`"
+            if st.button(btn_label, key=f"filter_holding_{filter_key}", use_container_width=True):
+                if filter_key in st.session_state.active_holding_filter:
+                    st.session_state.active_holding_filter.remove(filter_key)
+                else:
+                    st.session_state.active_holding_filter.append(filter_key)
+                st.rerun()
 
-    st.markdown("---")
-    
-    # --- Holding Status Filter ---
-    st.header("💼 狀態")
-    held_count = 0
-    not_held_count = 0
-    for item in display_data:
-        if is_held_item(item):
-            held_count += 1
-        else:
-            not_held_count += 1
+        if held_count > 0:
+            render_holding_filter("持有中", held_count, "HELD")
+        if not_held_count > 0:
+            render_holding_filter("未買進", not_held_count, "NOT_HELD")
 
-    def render_holding_filter(status, count, filter_key):
-        is_active = filter_key in st.session_state.get('active_holding_filter', [])
-        eye_icon = "👁️" if is_active else "👁‍🗨"
-        css_class = "tag-btn-notag"
-        if is_active:
-            css_class += " tag-active"
-        
-        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
-        
-        btn_label = f"{eye_icon} {status}  `{count}`"
-        if st.button(btn_label, key=f"filter_holding_{filter_key}", use_container_width=True):
-            if filter_key in st.session_state.active_holding_filter:
-                st.session_state.active_holding_filter.remove(filter_key)
+        # 個別 status 的 Clear btn 移除，稍後統一處理
+
+        st.markdown("---")
+
+        # --- Rating Filter ---
+        st.header("⭐ 評分")
+        rating_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0, 0: 0}
+        for item in display_data:
+            rate = item.get('rating', 0)
+            if rate in rating_counts:
+                rating_counts[rate] += 1
             else:
-                st.session_state.active_holding_filter.append(filter_key)
-            st.rerun()
-
-    if held_count > 0:
-        render_holding_filter("持有中", held_count, "HELD")
-    if not_held_count > 0:
-        render_holding_filter("未買進", not_held_count, "NOT_HELD")
-
-    # 個別 status 的 Clear btn 移除，稍後統一處理
-
-    st.markdown("---")
-
-    # --- Rating Filter ---
-    st.header("⭐ 評分")
-    rating_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0, 0: 0}
-    for item in display_data:
-        rate = item.get('rating', 0)
-        if rate in rating_counts:
-            rating_counts[rate] += 1
-        else:
-            rating_counts[0] += 1
+                rating_counts[0] += 1
             
-    def render_rating_filter(stars, count):
-        is_active = stars in st.session_state.get('active_rating_filter', [])
-        eye_icon = "👁️" if is_active else "👁‍🗨"
-        css_class = "tag-btn-notag"
-        if is_active:
-            css_class += " tag-active"
+        def render_rating_filter(stars, count):
+            is_active = stars in st.session_state.get('active_rating_filter', [])
+            eye_icon = "👁️" if is_active else "👁‍🗨"
+            css_class = "tag-btn-notag"
+            if is_active:
+                css_class += " tag-active"
         
-        st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="tag-marker {css_class}"></div>', unsafe_allow_html=True)
         
-        label = f"{stars} 星" if stars > 0 else "未評分"
-        btn_label = f"{eye_icon} {label}  `{count}`"
-        if st.button(btn_label, key=f"filter_rating_{stars}", use_container_width=True):
-            if stars in st.session_state.active_rating_filter:
-                st.session_state.active_rating_filter.remove(stars)
-            else:
-                st.session_state.active_rating_filter.append(stars)
-            st.rerun()
+            label = f"{stars} 星" if stars > 0 else "未評分"
+            btn_label = f"{eye_icon} {label}  `{count}`"
+            if st.button(btn_label, key=f"filter_rating_{stars}", use_container_width=True):
+                if stars in st.session_state.active_rating_filter:
+                    st.session_state.active_rating_filter.remove(stars)
+                else:
+                    st.session_state.active_rating_filter.append(stars)
+                st.rerun()
 
-    for s in [5, 4, 3, 2, 1, 0]:
-        val = rating_counts[s]
-        if val > 0:
-            render_rating_filter(s, val)
+        for s in [5, 4, 3, 2, 1, 0]:
+            val = rating_counts[s]
+            if val > 0:
+                render_rating_filter(s, val)
 
-    # 個別 rating 的 Clear btn 移除，稍後統一處理
+        # 個別 rating 的 Clear btn 移除，稍後統一處理
             
-    # --- Consolidated Clear Filter Button ---
-    if st.session_state.get('active_type_filter') or \
-       st.session_state.get('active_tag_filter') or \
-       st.session_state.get('active_holding_filter') or \
-       st.session_state.get('active_rating_filter'):
-        st.markdown('<div class="clear-filter-marker"></div>', unsafe_allow_html=True)
-        if st.button("✖️ Clear Status Filter", use_container_width=True):
-            st.session_state.active_type_filter = []
-            st.session_state.active_tag_filter = []
-            st.session_state.active_holding_filter = []
-            st.session_state.active_rating_filter = []
-            st.rerun()
+        # --- Consolidated Clear Filter Button ---
+        if st.session_state.get('active_type_filter') or \
+           st.session_state.get('active_tag_filter') or \
+           st.session_state.get('active_holding_filter') or \
+           st.session_state.get('active_rating_filter'):
+            st.markdown('<div class="clear-filter-marker"></div>', unsafe_allow_html=True)
+            if st.button("✖️ Clear Status Filter", use_container_width=True):
+                st.session_state.active_type_filter = []
+                st.session_state.active_tag_filter = []
+                st.session_state.active_holding_filter = []
+                st.session_state.active_rating_filter = []
+                st.rerun()
 # --- 前置設定 ---
 if 'refresh_interval' not in st.session_state:
     _sett = load_settings()
@@ -1434,6 +1466,38 @@ def handle_global_period_change():
             st.session_state[f"period_{tick}_seg"] = gp
 
 # --- 主畫面佈局 ---
+if st.session_state.get("nav_page", "📈 投資儀表板") == "📝 投資週報":
+    st.markdown('<div class="report-container-marker"></div>', unsafe_allow_html=True)
+    selected_report = st.session_state.get("selected_report_file")
+    if selected_report:
+        import os
+        report_path = os.path.join("reports", selected_report)
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                report_content = f.read()
+            
+            # 頂部動作列：標題 + 下載按鈕
+            date_str = selected_report.replace("report_", "").replace(".md", "")
+            c_title, c_download = st.columns([0.8, 0.2])
+            with c_title:
+                st.subheader(f"📊 股市週報 ({date_str})")
+            with c_download:
+                st.download_button(
+                    label="📥 下載 Markdown 報告",
+                    data=report_content,
+                    file_name=selected_report,
+                    mime="text/markdown",
+                    use_container_width=True
+                )
+                
+            st.markdown(report_content)
+            
+        except Exception as e:
+            st.error(f"讀取報告時發生錯誤: {str(e)}")
+    else:
+        st.info("請於左側選擇要檢視的週報期數。若尚未生成週報，請對 AI 助手發送「生成匯報」來生成週報。")
+    st.stop()
+
 st.markdown('<div class="toolbar-marker"></div>', unsafe_allow_html=True)
 c_period, c_spacer, c_sort, c_disp, c_add, c_refresh, c_set = st.columns([0.25, 0.30, 0.2, 0.1, 0.05, 0.05, 0.05], gap="small")
 
