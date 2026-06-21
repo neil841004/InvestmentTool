@@ -1054,6 +1054,9 @@ if 'active_rating_filter' not in st.session_state or not isinstance(st.session_s
 if 'active_type_filter' not in st.session_state or not isinstance(st.session_state.active_type_filter, list):
     st.session_state.active_type_filter = []
 
+if 'ticker_search_input' not in st.session_state:
+    st.session_state.ticker_search_input = ""
+
 # 確保 settings 已經載入
 _ = load_settings()
 display_data = [item for item in data if not is_cash_ticker(item.get("ticker"))]
@@ -1500,7 +1503,7 @@ if st.session_state.get("nav_page", "📈 投資儀表板") == "📝 投資週�
     st.stop()
 
 st.markdown('<div class="toolbar-marker"></div>', unsafe_allow_html=True)
-c_period, c_spacer, c_sort, c_disp, c_add, c_refresh, c_set = st.columns([0.25, 0.30, 0.2, 0.1, 0.05, 0.05, 0.05], gap="small")
+c_period, c_spacer, c_search, c_sort, c_disp, c_add, c_refresh, c_set = st.columns([0.25, 0.08, 0.22, 0.20, 0.10, 0.05, 0.05, 0.05], gap="small")
 
 with c_period:
     if "global_period_ui" not in st.session_state:
@@ -1510,6 +1513,18 @@ with c_period:
 
 with c_spacer:
     st.empty()
+
+with c_search:
+    def clear_search():
+        st.session_state.ticker_search_input = ""
+
+    c_search_input, c_search_clear = st.columns([0.85, 0.15])
+    with c_search_input:
+        st.text_input("Search Ticker", placeholder="🔍 搜尋 Ticker, 公司...", key="ticker_search_input", label_visibility="collapsed")
+    with c_search_clear:
+        if st.session_state.get("ticker_search_input", ""):
+            if st.button("❌", key="clear_ticker_search", help="清除搜尋", use_container_width=True, on_click=clear_search):
+                st.rerun()
 
 with c_sort:
     sort_opts = [
@@ -1632,8 +1647,33 @@ def apply_sort(items, method):
         return sorted(items, key=get_val, reverse=True)
     return items
 
+@st.cache_data
+def load_all_stock_names():
+    import json
+    import os
+    stock_map = {}
+    for filename in ["tw_stock_map.json", "us_stock_map.json"]:
+        if os.path.exists(filename):
+            try:
+                with open(filename, "r", encoding="utf-8") as f:
+                    stock_map.update(json.load(f))
+            except Exception:
+                pass
+    return stock_map
+
 def apply_filters(items):
     filtered = list(items)
+
+    # 搜尋過濾
+    search_query = st.session_state.get("ticker_search_input", "").strip().lower()
+    if search_query:
+        stock_map = load_all_stock_names()
+        filtered = [
+            item for item in filtered
+            if (search_query in item.get('ticker', '').lower() or
+                search_query in item.get('custom_name', '').lower() or
+                search_query in stock_map.get(item.get('ticker', ''), '').lower())
+        ]
 
     if st.session_state.active_type_filter:
         active_types = st.session_state.active_type_filter
