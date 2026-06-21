@@ -811,7 +811,34 @@ def show_edit_dialog(ticker):
 
         n_avg = 1.0 if is_cash else item.get("avg_cost", 0.0)
         n_sh = item.get("shares", 0.0)
-        n_tags = item.get("tags", [])
+        # 收集所有已存在的標籤作為建議選項
+        all_existing_tags = set()
+        for other_item in data:
+            for t in other_item.get("tags", []):
+                all_existing_tags.add(t)
+        
+        # 確保目前已選取的標籤也在選項清單中
+        current_tags = item.get("tags", [])
+        for t in current_tags:
+            all_existing_tags.add(t)
+            
+        all_existing_tags = sorted(list(all_existing_tags))
+        
+        # 使用並列欄位顯示多選下拉選單與新標籤輸入框
+        c_m, c_new = st.columns([0.7, 0.3])
+        with c_m:
+            selected_tags = st.multiselect(
+                label="Select Tags",
+                options=all_existing_tags,
+                default=current_tags,
+                key=f"ms_edit_{ticker}"
+            )
+        with c_new:
+            new_tag = st.text_input("Add New Tag", placeholder="Type & Save", key=f"nt_edit_{ticker}")
+            
+        n_tags = list(selected_tags)
+        if new_tag and new_tag not in n_tags:
+            n_tags.append(new_tag)
 
         if is_cash:
             n_yurl = ""
@@ -836,6 +863,7 @@ def show_edit_dialog(ticker):
             "rating": n_rating,
             "yahoo_url": n_yurl,
             "tradingview_url": n_tvurl,
+            "tags": n_tags,
         })
         st.rerun()
 
