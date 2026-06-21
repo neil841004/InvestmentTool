@@ -9,6 +9,8 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path("local_backups") / "investmenttool_backup.sqlite"
 DEFAULT_OUT_PATH = Path("local_backups") / "google_sheets_payload.json"
+CASH_TICKER = "CASH_TWD"
+CASH_DISPLAY_NAME = "持有現金"
 
 
 def decode_json(value, fallback):
@@ -42,7 +44,6 @@ def load_payload(db_path):
         ).fetchall()
 
     targets = []
-    assets = []
     for row in watchlist_rows:
         item = dict(row)
         raw = decode_json(item.get("raw_json"), {})
@@ -59,26 +60,38 @@ def load_payload(db_path):
         if not ticker:
             continue
 
+        is_cash = ticker.upper() == CASH_TICKER
         targets.append(
             {
-                "ticker": ticker,
-                "custom_name": merged.get("custom_name") or "",
+                "ticker": CASH_TICKER if is_cash else ticker,
+                "custom_name": merged.get("custom_name") or (CASH_DISPLAY_NAME if is_cash else ""),
                 "note": merged.get("note") or "",
                 "rating": int(merged.get("rating") or 0),
-                "yahoo_url": merged.get("yahoo_url") or "",
-                "tradingview_url": merged.get("tradingview_url") or "",
+                "yahoo_url": "" if is_cash else (merged.get("yahoo_url") or ""),
+                "tradingview_url": "" if is_cash else (merged.get("tradingview_url") or ""),
                 "tags": ",".join(str(tag) for tag in tags),
                 "display_order": int(merged.get("display_order") or 0),
                 "created_at": merged.get("created_at") or "",
+                "avg_cost": 1.0 if is_cash else float(merged.get("avg_cost") or 0),
+                "shares": float(merged.get("shares") or 0),
             }
         )
-        assets.append(
+
+    if not any(item["ticker"].upper() == CASH_TICKER for item in targets):
+        next_order = max((int(item.get("display_order") or 0) for item in targets), default=-1) + 1
+        targets.append(
             {
-                "ticker": ticker,
-                "avg_cost": float(merged.get("avg_cost") or 0),
-                "shares": float(merged.get("shares") or 0),
-                "holding": bool(merged.get("holding"))
-                or (float(merged.get("avg_cost") or 0) > 0 and float(merged.get("shares") or 0) > 0),
+                "ticker": CASH_TICKER,
+                "custom_name": CASH_DISPLAY_NAME,
+                "note": "",
+                "rating": 0,
+                "yahoo_url": "",
+                "tradingview_url": "",
+                "tags": "",
+                "display_order": next_order,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "avg_cost": 1.0,
+                "shares": 0.0,
             }
         )
 
@@ -107,7 +120,6 @@ def load_payload(db_path):
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "targets": targets,
-        "assets": assets,
         "settings": settings[:1],
     }
 
@@ -153,7 +165,6 @@ def main():
 
     print(f"Payload written: {out_path.resolve()}")
     print(f"Targets: {len(payload['targets'])}")
-    print(f"Assets: {len(payload['assets'])}")
     print(f"Settings rows: {len(payload['settings'])}")
 
     if args.web_app_url or args.token:

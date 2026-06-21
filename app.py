@@ -8,6 +8,33 @@ import plotly.graph_objects as go
 import watchlist_manager as wm
 from sparkline import create_sparkline
 
+CASH_TICKER = getattr(wm, "CASH_TICKER", "CASH_TWD")
+
+
+def is_cash_ticker(ticker):
+    return str(ticker or "").strip().upper() == CASH_TICKER
+
+
+def _to_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def item_shares(item):
+    return _to_float(item.get("shares", 0.0))
+
+
+def is_held_item(item):
+    return item_shares(item) > 0
+
+
+def get_cash_balance(item):
+    return item_shares(item) if is_cash_ticker(item.get("ticker")) else 0.0
+
 # --- Settings Management ---
 
 def load_settings():
@@ -373,11 +400,13 @@ st.markdown("""
 
 # --- 輔助函式 ---
 def get_market_type(ticker):
+    if is_cash_ticker(ticker): return "cash"
     if ".TW" in ticker: return "tw"
     if "-" in ticker: return "crypto"
     return "us"
 
 def get_market_color(mtype):
+    if mtype == "cash": return "#7DD3FC"
     if mtype == "tw": return "#00C853"
     if mtype == "us": return "#FF3D00"
     return "#FFD600"
@@ -392,6 +421,8 @@ def get_yahoo_symbol(ticker):
     return YAHOO_SYMBOL_OVERRIDES.get(ticker, ticker)
 
 def get_default_urls(ticker):
+    if is_cash_ticker(ticker):
+        return "", ""
     y_url = f"https://tw.stock.yahoo.com/quote/{ticker}"
     if ".TW" in ticker:
         y_url = f"https://tw.stock.yahoo.com/quote/{ticker.replace('.TW', '')}"
@@ -406,6 +437,9 @@ def get_default_urls(ticker):
 
 @st.cache_data(ttl=60)
 def get_hist_data(ticker, period):
+    if is_cash_ticker(ticker):
+        return pd.DataFrame()
+
     intervals = {'1D': '5m', '7D': '1h', '1M': '1d', '1Y': '1wk', 'ALL': '1mo'}
     yf_period = {'1D': '1d', '7D': '5d', '1M': '1mo', '1Y': '1y', 'ALL': 'max'}[period]
     
@@ -444,12 +478,15 @@ def get_hist_data_batch(tickers, period):
     tickers = tuple(dict.fromkeys(str(t).strip() for t in tickers if str(t).strip()))
     if not tickers:
         return {}
+    market_tickers = tuple(ticker for ticker in tickers if not is_cash_ticker(ticker))
+    results = {ticker: pd.DataFrame() for ticker in tickers}
+    if not market_tickers:
+        return results
 
     intervals = {'1D': '5m', '7D': '1h', '1M': '1d', '1Y': '1wk', 'ALL': '1mo'}
     yf_period = {'1D': '1d', '7D': '5d', '1M': '1mo', '1Y': '1y', 'ALL': 'max'}[period]
 
-    results = {ticker: pd.DataFrame() for ticker in tickers}
-    download_map = {ticker: get_yahoo_symbol(ticker) for ticker in tickers}
+    download_map = {ticker: get_yahoo_symbol(ticker) for ticker in market_tickers}
     download_symbols = tuple(dict.fromkeys(download_map.values()))
     try:
         raw = yf.download(
@@ -466,11 +503,11 @@ def get_hist_data_batch(tickers, period):
 
     if not raw.empty:
         if len(download_symbols) == 1:
-            results[tickers[0]] = _normalize_hist_frame(raw)
+            results[market_tickers[0]] = _normalize_hist_frame(raw)
         elif isinstance(raw.columns, pd.MultiIndex):
             level0 = set(raw.columns.get_level_values(0))
             level1 = set(raw.columns.get_level_values(1))
-            for ticker in tickers:
+            for ticker in market_tickers:
                 yahoo_symbol = download_map[ticker]
                 try:
                     if yahoo_symbol in level0:
@@ -482,7 +519,7 @@ def get_hist_data_batch(tickers, period):
 
     fallback_map = {
         ticker: ticker.replace(".TW", ".TWO")
-        for ticker in tickers
+        for ticker in market_tickers
         if ticker.endswith(".TW") and results[ticker].empty and download_map[ticker] == ticker
     }
     if fallback_map:
@@ -519,6 +556,9 @@ def get_hist_data_batch(tickers, period):
 
 @st.cache_data(ttl=60)
 def get_live_price(ticker):
+    if is_cash_ticker(ticker):
+        return 1.0
+
     def fetch_price(t_sym):
         try:
             t = yf.Ticker(t_sym)
@@ -562,7 +602,7 @@ def _dedupe_tickers(tickers):
     return tuple(sorted({str(t).strip() for t in tickers if str(t).strip()}))
 
 def prime_hist_data(tickers, period):
-    tickers = _dedupe_tickers(tickers)
+    tickers = tuple(ticker for ticker in _dedupe_tickers(tickers) if not is_cash_ticker(ticker))
     missing = [ticker for ticker in tickers if (ticker, period) not in _run_hist_cache]
     if not missing:
         return
@@ -574,12 +614,18 @@ def prime_hist_data(tickers, period):
             _run_price_cache.setdefault(ticker, price)
 
 def get_cached_hist_data(ticker, period):
+    if is_cash_ticker(ticker):
+        return pd.DataFrame()
+
     key = (ticker, period)
     if key not in _run_hist_cache:
         _run_hist_cache[key] = get_hist_data(ticker, period)
     return _run_hist_cache[key]
 
 def get_cached_live_price(ticker, preferred_period=None):
+    if is_cash_ticker(ticker):
+        return 1.0
+
     if ticker in _run_price_cache:
         return _run_price_cache[ticker]
 
@@ -601,11 +647,16 @@ def get_cached_usdtwd_rate():
     return _run_usdtwd_rate
 
 def calculate_holding_profit(item, live_price):
-    avg_cost = item.get('avg_cost', 0.0)
-    shares = item.get('shares', 0.0)
-    if avg_cost > 0 and shares > 0 and live_price is not None:
+    shares = item_shares(item)
+    if is_cash_ticker(item.get("ticker")):
+        return (shares, 0.0) if shares > 0 else (None, None)
+
+    avg_cost = _to_float(item.get('avg_cost', 0.0))
+    if shares > 0 and live_price is not None:
         total_cost = avg_cost * shares
         current_val = live_price * shares
+        if total_cost <= 0:
+            return current_val, None
         profit = current_val - total_cost
         pct = (profit / total_cost) * 100
         return current_val, pct # Return total value and profit percentage
@@ -639,6 +690,9 @@ def render_tags_html(tags):
     return tags_html
 
 def render_links(item):
+    if is_cash_ticker(item.get('ticker')):
+        return ""
+
     du_y, du_tv = get_default_urls(item['ticker'])
     y_url = item.get('yahoo_url') or du_y
     tv_url = item.get('tradingview_url') or du_tv
@@ -651,6 +705,14 @@ def render_links(item):
 @st.fragment
 def render_live_data(item, period):
     ticker = item['ticker']
+    if is_cash_ticker(ticker):
+        cash_balance = get_cash_balance(item)
+        st.markdown(
+            f"<div class='holding-profit'>Cash Balance: <span class='change-pos'>NT${cash_balance:,.0f}</span></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
     hist = get_cached_hist_data(ticker, period)
     live_p = get_cached_live_price(ticker, preferred_period=period)
     curr_sym = "<span class='curr-sym'>NT$</span>" if get_market_type(ticker) == "tw" else "<span class='curr-sym'>US$</span>"
@@ -684,8 +746,11 @@ def render_live_data(item, period):
     val, p_pct = calculate_holding_profit(item, live_p)
     holding_html = ""
     if val is not None:
-        p_color = "change-pos" if p_pct >= 0 else "change-neg"
-        holding_html = f"<div class='holding-profit'>Total Value: <span class='{p_color}'>{curr_sym}{val:,.2f} ({p_pct:+.2f}%)</span></div>"
+        if p_pct is None:
+            holding_html = f"<div class='holding-profit'>Total Value: <span>{curr_sym}{val:,.2f}</span></div>"
+        else:
+            p_color = "change-pos" if p_pct >= 0 else "change-neg"
+            holding_html = f"<div class='holding-profit'>Total Value: <span class='{p_color}'>{curr_sym}{val:,.2f} ({p_pct:+.2f}%)</span></div>"
 
     if chart_img:
         st.markdown(combined_html, unsafe_allow_html=True)
@@ -731,12 +796,6 @@ def show_chart_dialog(ticker, period):
 def find_item_by_ticker(ticker):
     return next((item for item in data if item.get("ticker") == ticker), None)
 
-def collect_tag_options(current_tags=None):
-    tags = set(current_tags or [])
-    for other_item in data:
-        tags.update(other_item.get("tags", []))
-    return sorted(t for t in tags if t)
-
 @st.dialog("Edit Ticker")
 def show_edit_dialog(ticker):
     item = find_item_by_ticker(ticker)
@@ -744,35 +803,22 @@ def show_edit_dialog(ticker):
         st.warning("Ticker is no longer in the watchlist.")
         return
 
+    is_cash = is_cash_ticker(ticker)
     st.markdown(f"### Edit {ticker}")
     with st.form(key=f"edit_dialog_form_{ticker}"):
         n_custom = st.text_input("Custom Company Name", value=item.get("custom_name", ""))
         n_rating = st.slider("Rating", 0, 5, item.get("rating", 0))
 
-        c_avg, c_sh = st.columns(2)
-        with c_avg:
-            n_avg = st.number_input("Avg Cost", value=float(item.get("avg_cost", 0.0)), step=0.1)
-        with c_sh:
-            n_sh = st.number_input("Shares/Qty", value=float(item.get("shares", 0.0)), step=0.00001, format="%.5f")
+        n_avg = 1.0 if is_cash else item.get("avg_cost", 0.0)
+        n_sh = item.get("shares", 0.0)
+        n_tags = item.get("tags", [])
 
-        current_tags = item.get("tags", [])
-        c_m, c_new = st.columns([0.7, 0.3])
-        with c_m:
-            selected_tags = st.multiselect(
-                label="Select Tags",
-                options=collect_tag_options(current_tags),
-                default=current_tags,
-                key=f"edit_dialog_tags_{ticker}",
-            )
-        with c_new:
-            new_tag = st.text_input("Add New Tag", placeholder="Type & Save", key=f"edit_dialog_new_tag_{ticker}")
-
-        n_tags = list(selected_tags)
-        if new_tag and new_tag not in n_tags:
-            n_tags.append(new_tag)
-
-        n_yurl = st.text_input("Yahoo URL (Optional)", value=item.get("yahoo_url", ""))
-        n_tvurl = st.text_input("TradingView URL (Optional)", value=item.get("tradingview_url", ""))
+        if is_cash:
+            n_yurl = ""
+            n_tvurl = ""
+        else:
+            n_yurl = st.text_input("Yahoo URL (Optional)", value=item.get("yahoo_url", ""))
+            n_tvurl = st.text_input("TradingView URL (Optional)", value=item.get("tradingview_url", ""))
 
         c_save, c_del = st.columns([0.7, 0.3])
         with c_save:
@@ -788,9 +834,6 @@ def show_edit_dialog(ticker):
         item.update({
             "custom_name": n_custom,
             "rating": n_rating,
-            "avg_cost": n_avg,
-            "shares": n_sh,
-            "tags": n_tags,
             "yahoo_url": n_yurl,
             "tradingview_url": n_tvurl,
         })
@@ -827,71 +870,7 @@ def render_edit_popover(item, key_prefix):
     ticker = item['ticker']
     if st.button("...", key=f"edit_btn_{key_prefix}_{ticker}", help=f"Edit {ticker}", use_container_width=True):
         show_edit_dialog(ticker)
-    return
-    with st.popover("⋮"):
-        st.markdown(f"### Edit {ticker}")
-        with st.form(key=f"form_{key_prefix}_{ticker}"):
-            n_custom = st.text_input("Custom Company Name", value=item.get('custom_name',''))
-            n_rating = st.slider("Rating", 0, 5, item.get('rating',0))
-            
-            c_avg, c_sh = st.columns(2)
-            with c_avg:
-                n_avg = st.number_input("Avg Cost", value=float(item.get('avg_cost',0.0)), step=0.1)
-            with c_sh:
-                n_sh = st.number_input("Shares/Qty", value=float(item.get('shares',0.0)), step=0.00001, format="%.5f")
-            # Collect all existing tags from cached data for suggestions
-            all_existing_tags = set()
-            for other_item in data:
-                for t in other_item.get('tags', []):
-                    all_existing_tags.add(t)
-            
-            # Ensure currently selected tags are always in the options list
-            current_tags = item.get('tags', [])
-            for t in current_tags:
-                all_existing_tags.add(t)
-                
-            all_existing_tags = sorted(list(all_existing_tags))
-            
-            # Use columns to put multiselect and a text input side-by-side
-            c_m, c_new = st.columns([0.7, 0.3])
-            with c_m:
-                selected_tags = st.multiselect(
-                    label="Select Tags",
-                    options=all_existing_tags,
-                    default=current_tags,
-                    key=f"ms_{key_prefix}_{ticker}"
-                )
-            with c_new:
-                new_tag = st.text_input("Add New Tag", placeholder="Type & Save", key=f"nt_{key_prefix}_{ticker}")
-                
-            n_tags = selected_tags
-            if new_tag and new_tag not in n_tags:
-                n_tags.append(new_tag)
-            
-            n_yurl = st.text_input("Yahoo URL (Optional)", value=item.get('yahoo_url',''))
-            n_tvurl = st.text_input("TradingView URL (Optional)", value=item.get('tradingview_url',''))
-            
-            c_save, c_del = st.columns([0.7, 0.3])
-            with c_save:
-                submitted = st.form_submit_button("Save", type="primary", use_container_width=True)
-            with c_del:
-                deleted = st.form_submit_button("Delete", use_container_width=True)
-                
-            if submitted:
-                wm.update_ticker_data(
-                    ticker, item.get('note',''), n_rating,
-                    n_yurl, n_tvurl, n_avg, n_sh, n_tags, n_custom
-                )
-                item.update({
-                    'custom_name': n_custom, 'rating': n_rating,
-                    'avg_cost': n_avg, 'shares': n_sh, 'tags': n_tags,
-                    'yahoo_url': n_yurl, 'tradingview_url': n_tvurl
-                })
-                st.rerun(scope="fragment")
-                
-            if deleted:
-                wm.remove_ticker_from_watchlist(ticker)
-                st.rerun()
+
 
 def render_note_popover(item, key_prefix):
     ticker = item['ticker']
@@ -899,33 +878,20 @@ def render_note_popover(item, key_prefix):
     label = "N*" if note_text.strip() else "N"
     if st.button(label, key=f"note_btn_{key_prefix}_{ticker}", help=note_text if note_text else "Add note", use_container_width=True):
         show_note_dialog(ticker)
-    return
-    note_text = item.get('note', '')
-    icon = "📝" if note_text.strip() else "🖊️"
-    
-    with st.popover(icon, help=note_text if note_text else "Add note"):
-        new_note = st.text_area("Note", value=note_text, height=300, key=f"note_area_{key_prefix}_{ticker}")
-        if new_note != note_text:
-            wm.update_ticker_data(
-                ticker, new_note, item.get('rating',0),
-                item.get('yahoo_url',''), item.get('tradingview_url',''),
-                item.get('avg_cost',0.0), item.get('shares',0.0),
-                item.get('tags',[]), item.get('custom_name','')
-            )
-            item['note'] = new_note
-            st.rerun(scope="fragment")
+
 
 @st.fragment
 def render_card(item, i, j):
     ticker = item['ticker']
+    is_cash = is_cash_ticker(ticker)
     mtype = get_market_type(ticker)
     mcolor = get_market_color(mtype)
     
     # Period selection setup
-    if f"period_{ticker}" not in st.session_state:
+    if not is_cash and f"period_{ticker}" not in st.session_state:
          default_p = st.session_state.settings.get("default_period", "1M") if "settings" in st.session_state else "1M"
          st.session_state[f"period_{ticker}"] = default_p
-    period = st.session_state[f"period_{ticker}"]
+    period = "1D" if is_cash else st.session_state[f"period_{ticker}"]
     
     with st.container(border=True):
         # Title row
@@ -948,6 +914,8 @@ def render_card(item, i, j):
                 
         # Live Data
         render_live_data(item, period)
+        if is_cash:
+            return
         
         # Chart Controls and Links
         if f"period_{ticker}_seg" not in st.session_state:
@@ -964,6 +932,30 @@ def render_card(item, i, j):
 def render_list_item(item):
     ticker = item['ticker']
     name = wm.get_display_name(ticker, item_data=item)
+    if is_cash_ticker(ticker):
+        curr_sym = "<span class='curr-sym'>NT$</span>"
+        tags_html = render_tags_html(item.get('tags', []))
+        rating_str = render_stars(item.get('rating',0))
+        market_col = get_market_color(get_market_type(ticker))
+        profit_html = f"<span style='font-weight:bold;'>{curr_sym}{get_cash_balance(item):,.0f}</span>"
+
+        cc = st.columns([0.15, 0.12, 0.12, 0.12, 0.1, 0.1, 0.08, 0.1, 0.11])
+        cc[0].markdown(f"<div style='border-left: 4px solid {market_col}; padding-left: 8px;'><b style='font-size:1.1rem;'>{ticker}</b><br><span style='color:#888; font-size:0.85rem;'>{name}</span></div>", unsafe_allow_html=True)
+        cc[1].markdown("<span style='font-size:1.1rem;'>TWD</span>", unsafe_allow_html=True)
+        cc[2].markdown("-", unsafe_allow_html=True)
+        cc[3].markdown(profit_html, unsafe_allow_html=True)
+        cc[4].markdown(f"<div style='margin-top:5px;'>{rating_str}</div>", unsafe_allow_html=True)
+        cc[5].markdown(f"<div style='margin-top:4px;'>{tags_html}</div>", unsafe_allow_html=True)
+        with cc[6]:
+            c_p1, c_p2 = st.columns(2)
+            with c_p1:
+                render_note_popover(item, f"list_{ticker}")
+            with c_p2:
+                render_edit_popover(item, f"list_{ticker}")
+        cc[7].markdown("", unsafe_allow_html=True)
+        st.markdown("<hr style='margin: 0.5em 0; border-color: #333;'>", unsafe_allow_html=True)
+        return
+
     hist = get_cached_hist_data(ticker, "1D")
     live_p = get_cached_live_price(ticker, preferred_period="1D")
     curr_sym = "<span class='curr-sym'>NT$</span>" if get_market_type(ticker) == "tw" else "<span class='curr-sym'>US$</span>"
@@ -982,9 +974,12 @@ def render_list_item(item):
     val, p_pct = calculate_holding_profit(item, live_p)
     profit_html = "-"
     if val is not None:
-        color = "#FF3D00" if p_pct >= 0 else "#00C853"
-        sign = "+" if p_pct >= 0 else ""
-        profit_html = f"<span style='color:{color}; font-weight:bold;'>{curr_sym}{val:,.2f} ({sign}{p_pct:.2f}%)</span>"
+        if p_pct is None:
+            profit_html = f"<span style='font-weight:bold;'>{curr_sym}{val:,.2f}</span>"
+        else:
+            color = "#FF3D00" if p_pct >= 0 else "#00C853"
+            sign = "+" if p_pct >= 0 else ""
+            profit_html = f"<span style='color:{color}; font-weight:bold;'>{curr_sym}{val:,.2f} ({sign}{p_pct:.2f}%)</span>"
         
     tags_html = render_tags_html(item.get('tags', []))
     rating_str = render_stars(item.get('rating',0))
@@ -1066,7 +1061,7 @@ _ = load_settings()
 summary_tickers = [
     item["ticker"]
     for item in data
-    if item.get("avg_cost", 0.0) > 0 and item.get("shares", 0.0) > 0
+    if is_held_item(item) and not is_cash_ticker(item.get("ticker"))
 ]
 prime_hist_data(summary_tickers, "1D")
 
@@ -1075,13 +1070,21 @@ with st.sidebar:
     
     total_cost = 0.0
     total_value = 0.0
+    profit_basis_value = 0.0
     usdtwd = get_cached_usdtwd_rate()
     
     for item in data:
+        shares = item_shares(item)
+        if shares <= 0:
+            continue
+
+        if is_cash_ticker(item.get("ticker")):
+            total_value += shares
+            continue
+
         live_p = get_cached_live_price(item['ticker'], preferred_period="1D")
-        avg_cost = item.get('avg_cost', 0.0)
-        shares = item.get('shares', 0.0)
-        if avg_cost > 0 and shares > 0 and live_p is not None:
+        avg_cost = _to_float(item.get('avg_cost', 0.0))
+        if live_p is not None:
             item_cost = avg_cost * shares
             item_value = live_p * shares
             
@@ -1090,10 +1093,12 @@ with st.sidebar:
                 item_cost *= usdtwd
                 item_value *= usdtwd
                 
-            total_cost += item_cost
             total_value += item_value
+            if avg_cost > 0:
+                total_cost += item_cost
+                profit_basis_value += item_value
                 
-    total_profit = total_value - total_cost
+    total_profit = profit_basis_value - total_cost
     total_pct = (total_profit / total_cost * 100) if total_cost > 0 else 0
     
     p_color_val = "#FF3D00" if total_profit >= 0 else "#00C853"
@@ -1114,9 +1119,11 @@ with st.sidebar:
     
     # --- Market Type Filter ---
     st.header("🌐 類型")
-    type_counts = {"tw": 0, "us": 0, "crypto": 0}
+    type_counts = {"tw": 0, "us": 0, "crypto": 0, "cash": 0}
     type_labels = {"tw": "🇹🇼 台股", "us": "🇺🇸 美股", "crypto": "🪙 加密貨幣"}
     type_colors = {"tw": "#00C853", "us": "#FF3D00", "crypto": "#FFD600"}
+    type_labels["cash"] = "Cash"
+    type_colors["cash"] = "#7DD3FC"
     for item in data:
         mtype = get_market_type(item['ticker'])
         if mtype in type_counts:
@@ -1130,7 +1137,7 @@ with st.sidebar:
         div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button {{
             background-color: {mtype_color} !important;
             border-color: rgba(255,255,255,0.2) !important;
-            color: {'white' if mtype_key != 'crypto' else '#1E1E1E'} !important;
+            color: {'#1E1E1E' if mtype_key in ['crypto', 'cash'] else 'white'} !important;
             display: flex !important;
             justify-content: space-between !important;
             padding-left: 15px !important;
@@ -1158,7 +1165,7 @@ with st.sidebar:
                 st.session_state.active_type_filter.append(mtype_key)
             st.rerun()
 
-    for mtype_key in ["tw", "us", "crypto"]:
+    for mtype_key in ["tw", "us", "crypto", "cash"]:
         if type_counts[mtype_key] > 0:
             render_type_filter(mtype_key, type_labels[mtype_key], type_counts[mtype_key])
 
@@ -1314,7 +1321,7 @@ with st.sidebar:
     held_count = 0
     not_held_count = 0
     for item in data:
-        if item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0:
+        if is_held_item(item):
             held_count += 1
         else:
             not_held_count += 1
@@ -1433,7 +1440,7 @@ with c_spacer:
 
 with c_sort:
     sort_opts = [
-        "Type (TW > US > Crypto)", 
+        "Type (TW > US > Crypto > Cash)",
         "1D Change (High > Low)", 
         "1D Change (Low > High)", 
         "30D Change (High > Low)", 
@@ -1519,8 +1526,8 @@ with c_set:
 
 # --- 排序邏輯 ---
 def apply_sort(items, method):
-    if method == "Type (TW > US > Crypto)":
-        order_map = {"tw": 0, "us": 1, "crypto": 2}
+    if method.startswith("Type (TW > US > Crypto"):
+        order_map = {"tw": 0, "us": 1, "crypto": 2, "cash": 3}
         return sorted(items, key=lambda x: order_map.get(get_market_type(x['ticker']), 99))
     elif method == "Rating (High > Low)":
         return sorted(items, key=lambda x: x.get('rating', 0), reverse=True)
@@ -1538,9 +1545,12 @@ def apply_sort(items, method):
         return sorted(items, key=lambda x: get_chg(x['ticker']), reverse=reverse)
     elif method == "Total Value (High > Low)":
         def get_val(item):
+            if is_cash_ticker(item.get('ticker')):
+                return get_cash_balance(item)
             lp = get_cached_live_price(item['ticker'], preferred_period="1D")
-            if lp is not None and item.get('avg_cost',0)>0 and item.get('shares',0)>0:
-                val = lp * item.get('shares',0)
+            shares = item_shares(item)
+            if lp is not None and shares > 0:
+                val = lp * shares
                 # Normalize to TWD for sorting
                 if get_market_type(item['ticker']) in ["us", "crypto"]:
                     val *= get_cached_usdtwd_rate()
@@ -1570,8 +1580,8 @@ def apply_filters(items):
         active_holdings = st.session_state.active_holding_filter
         filtered = [
             item for item in filtered
-            if ("HELD" in active_holdings and item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0) or
-               ("NOT_HELD" in active_holdings and not (item.get('avg_cost', 0.0) > 0 and item.get('shares', 0.0) > 0))
+            if ("HELD" in active_holdings and is_held_item(item)) or
+               ("NOT_HELD" in active_holdings and not is_held_item(item))
         ]
 
     if st.session_state.active_rating_filter:
@@ -1648,7 +1658,7 @@ if not current_items:
             st.rerun()
     elif not data:
         st.warning("Google Sheets returned no watchlist items.")
-        st.caption("Check that the Apps Script deployment is connected to the sheet tabs named targets and assets.")
+        st.caption("Check that the Apps Script deployment is connected to the sheet tab named targets.")
     else:
         st.info("Watchlist is empty in this group.")
 else:
@@ -1689,22 +1699,22 @@ else:
                 # 用 marker 標記分頁區塊，讓 CSS 能精準定位
                 st.markdown('<div class="pagination-marker"></div>', unsafe_allow_html=True)
 
-                # 建立欄位：◀ + 頁碼按鈕們 + ▶
+                # 建立欄位：spacer + ◀ + 頁碼按鈕們 + ▶ + spacer
                 num_page_slots = len(page_numbers)
-                # 箭頭欄寬度較窄，中間頁碼均分
-                col_specs = [0.08] + [1.0] * num_page_slots + [0.08]
+                # 左右空白欄推擠讓按鈕集中在中央；箭頭較寬，頁碼窄
+                col_specs = [3.0, 0.6] + [0.3] * num_page_slots + [0.6, 3.0]
                 pg_cols = st.columns(col_specs)
 
-                # 上一頁箭頭
-                with pg_cols[0]:
+                # 上一頁箭頭 (index 1)
+                with pg_cols[1]:
                     if st.button("◀", disabled=card_page == 0, key="_pg_prev", use_container_width=True):
                         st.session_state.card_page = max(0, card_page - 1)
                         st.rerun()
 
-                # 頁碼按鈕
+                # 頁碼按鈕 (index 2 ~ 2+num_page_slots-1)
                 ellipsis_counter = 0
                 for idx, pn in enumerate(page_numbers):
-                    with pg_cols[idx + 1]:
+                    with pg_cols[idx + 2]:
                         if pn is None:
                             ellipsis_counter += 1
                             st.markdown(
@@ -1714,14 +1724,12 @@ else:
                         else:
                             is_active = (pn - 1 == card_page)
                             if is_active:
-                                # 當前頁：用 HTML 渲染成深青色背景的方塊
+                                # 當前頁：用 HTML 渲染成深青色背景方塊，寬度撐滿與 button 一致
                                 st.markdown(
-                                    f"<div style='text-align:center;'>"
-                                    f"<span style='display:inline-flex;justify-content:center;align-items:center;"
-                                    f"min-width:36px;height:36px;padding:0 10px;"
+                                    f"<div style='display:flex;justify-content:center;align-items:center;"
+                                    f"width:100%;height:38px;"
                                     f"background-color:#2a9d8f;color:#fff;border-radius:6px;"
-                                    f"font-weight:700;font-size:0.9rem;'>{pn}</span>"
-                                    f"</div>",
+                                    f"font-weight:700;font-size:0.9rem;box-sizing:border-box;'>{pn}</div>",
                                     unsafe_allow_html=True,
                                 )
                             else:
@@ -1729,8 +1737,8 @@ else:
                                     st.session_state.card_page = pn - 1
                                     st.rerun()
 
-                # 下一頁箭頭
-                with pg_cols[-1]:
+                # 下一頁箭頭 (index -2)
+                with pg_cols[-2]:
                     if st.button("▶", disabled=card_page >= card_total_pages - 1, key="_pg_next", use_container_width=True):
                         st.session_state.card_page = min(card_total_pages - 1, card_page + 1)
                         st.rerun()

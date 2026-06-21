@@ -10,6 +10,8 @@ import streamlit as st
 MAP_FILE = "tw_stock_map.json"
 WATCHLIST_FILE = "watchlist.json"
 LOCAL_BACKUP_DB = os.path.join("local_backups", "investmenttool_backup.sqlite")
+CASH_TICKER = "CASH_TWD"
+CASH_DISPLAY_NAME = "持有現金"
 SHEETS_RETRIES = 1
 SHEETS_TIMEOUT_SECONDS = 8
 SHEETS_BACKOFF_SECONDS = 120
@@ -155,6 +157,10 @@ def _coerce_bool(value):
     return False
 
 
+def is_cash_ticker(ticker):
+    return str(ticker or "").strip().upper() == CASH_TICKER
+
+
 def _normalize_tags(value):
     if isinstance(value, list):
         return [str(tag).strip() for tag in value if str(tag).strip()]
@@ -167,17 +173,20 @@ def _normalize_tags(value):
 
 
 def _normalize_item(item):
+    ticker = str(item.get("ticker") or "").strip()
     avg_cost = _coerce_float(item.get("avg_cost"))
     shares = _coerce_float(item.get("shares"))
-    holding = _coerce_bool(item.get("holding")) or (avg_cost > 0 and shares > 0)
+    if is_cash_ticker(ticker) and avg_cost <= 0:
+        avg_cost = 1.0
+    holding = shares > 0
     return {
-        "ticker": str(item.get("ticker") or "").strip(),
-        "custom_name": item.get("custom_name") or "",
+        "ticker": CASH_TICKER if is_cash_ticker(ticker) else ticker,
+        "custom_name": item.get("custom_name") or (CASH_DISPLAY_NAME if is_cash_ticker(ticker) else ""),
         "note": item.get("note") or "",
         "rating": _coerce_int(item.get("rating")),
         "holding": holding,
-        "yahoo_url": item.get("yahoo_url") or "",
-        "tradingview_url": item.get("tradingview_url") or "",
+        "yahoo_url": "" if is_cash_ticker(ticker) else (item.get("yahoo_url") or ""),
+        "tradingview_url": "" if is_cash_ticker(ticker) else (item.get("tradingview_url") or ""),
         "avg_cost": avg_cost,
         "shares": shares,
         "tags": _normalize_tags(item.get("tags")),
@@ -186,17 +195,52 @@ def _normalize_item(item):
     }
 
 
+def _default_cash_item(display_order=0):
+    return {
+        "ticker": CASH_TICKER,
+        "custom_name": CASH_DISPLAY_NAME,
+        "note": "",
+        "rating": 0,
+        "holding": False,
+        "yahoo_url": "",
+        "tradingview_url": "",
+        "avg_cost": 1.0,
+        "shares": 0.0,
+        "tags": [],
+        "display_order": display_order,
+        "created_at": "",
+    }
+
+
+def _ensure_cash_item(items):
+    normalized = []
+    has_cash = False
+    max_order = -1
+
+    for item in items:
+        clean_item = _normalize_item(item)
+        max_order = max(max_order, _coerce_int(clean_item.get("display_order"), len(normalized)))
+        if is_cash_ticker(clean_item.get("ticker")):
+            has_cash = True
+        normalized.append(clean_item)
+
+    if not has_cash:
+        normalized.append(_default_cash_item(max_order + 1))
+
+    return normalized
+
+
 def _load_local_watchlist():
     sqlite_data = _load_sqlite_watchlist()
     if sqlite_data:
-        return sqlite_data
+        return _ensure_cash_item(sqlite_data)
 
     try:
         if os.path.exists(WATCHLIST_FILE):
             with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                return [_normalize_item(item) for item in data if item.get("ticker")]
+                return _ensure_cash_item(item for item in data if item.get("ticker"))
     except Exception as exc:
         print(f"local watchlist fallback failed: {type(exc).__name__}: {exc}")
     return []
@@ -239,7 +283,7 @@ def _save_local_watchlist(data):
         os.makedirs(os.path.dirname(LOCAL_BACKUP_DB), exist_ok=True)
         backed_up_at = datetime.now(timezone.utc).isoformat()
         normalized = []
-        for i, item in enumerate(data):
+        for i, item in enumerate(_ensure_cash_item(data)):
             clean_item = _normalize_item(item)
             clean_item["display_order"] = i
             if clean_item["ticker"]:
@@ -354,7 +398,7 @@ def load_watchlist():
     local_data = _load_local_watchlist()
     if local_data:
         clear_connection_warning()
-        return local_data
+        return _ensure_cash_item(local_data)
 
     return load_watchlist_from_remote()
 
@@ -368,16 +412,16 @@ def load_watchlist_from_remote():
             items = response.get("watchlist") or response.get("data") or []
         if not isinstance(items, list):
             raise RuntimeError(f"Google Sheets returned invalid watchlist payload: {type(items).__name__}")
-        normalized = [
+        normalized = _ensure_cash_item([
             _normalize_item(item)
             for item in items
             if isinstance(item, dict) and item.get("ticker")
-        ]
+        ])
         if normalized:
             _save_local_watchlist(normalized)
         elif not local_data:
             _set_connection_warning(
-                "Google Sheets returned 0 watchlist items. Check that the deployed Streamlit secrets point to the Apps Script connected to the sheet with targets/assets data."
+                "Google Sheets returned 0 watchlist items. Check that the deployed Streamlit secrets point to the sheet tab named targets."
             )
         return normalized
     except Exception as exc:
@@ -398,7 +442,7 @@ def save_watchlist(data):
     """Save the complete watchlist to Google Sheets."""
     try:
         normalized = []
-        for i, item in enumerate(data):
+        for i, item in enumerate(_ensure_cash_item(data)):
             clean_item = _normalize_item(item)
             clean_item["display_order"] = i
             if clean_item["ticker"]:
@@ -480,7 +524,7 @@ def update_ticker_data(
                         "avg_cost": avg_cost,
                         "shares": shares,
                         "tags": tags,
-                        "holding": _coerce_float(avg_cost) > 0 and _coerce_float(shares) > 0,
+                        "holding": _coerce_float(shares) > 0,
                     }
                 )
                 updated = True
