@@ -1056,12 +1056,19 @@ if 'active_type_filter' not in st.session_state or not isinstance(st.session_sta
 
 # 確保 settings 已經載入
 _ = load_settings()
+display_data = [item for item in data if not is_cash_ticker(item.get("ticker"))]
+
+valid_type_filters = {"tw", "us", "crypto"}
+st.session_state.active_type_filter = [
+    mtype for mtype in st.session_state.active_type_filter
+    if mtype in valid_type_filters
+]
 
 # Sidebar: Group Management & Search
 summary_tickers = [
     item["ticker"]
-    for item in data
-    if is_held_item(item) and not is_cash_ticker(item.get("ticker"))
+    for item in display_data
+    if is_held_item(item)
 ]
 prime_hist_data(summary_tickers, "1D")
 
@@ -1070,6 +1077,7 @@ with st.sidebar:
     
     total_cost = 0.0
     total_value = 0.0
+    cash_value = 0.0
     profit_basis_value = 0.0
     usdtwd = get_cached_usdtwd_rate()
     
@@ -1079,6 +1087,7 @@ with st.sidebar:
             continue
 
         if is_cash_ticker(item.get("ticker")):
+            cash_value += shares
             total_value += shares
             continue
 
@@ -1108,6 +1117,7 @@ with st.sidebar:
     <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:4px solid {p_color_val};'>
         <div style='color:grey; font-size:0.9rem;'>Total Value (NTD)</div>
         <div style='font-size:1.8rem; font-weight:bold; color:white;'>NT${total_value:,.0f}</div>
+        <div style='color:#7DD3FC; font-size:0.85rem; margin-top:2px;'>持有現金: NT${cash_value:,.0f}</div>
         <div style='color:grey; font-size:0.9rem; margin-top:10px;'>Total Profit</div>
         <div style='font-size:1.2rem; font-weight:bold; color:{p_color_val};'>{sign_val}NT${total_profit:,.0f} ({sign_val}{total_pct:.2f}%)</div>
         <div style='color:grey; font-size:0.8rem; margin-top:5px;'>Cost: NT${total_cost:,.0f}</div>
@@ -1119,12 +1129,10 @@ with st.sidebar:
     
     # --- Market Type Filter ---
     st.header("🌐 類型")
-    type_counts = {"tw": 0, "us": 0, "crypto": 0, "cash": 0}
+    type_counts = {"tw": 0, "us": 0, "crypto": 0}
     type_labels = {"tw": "🇹🇼 台股", "us": "🇺🇸 美股", "crypto": "🪙 加密貨幣"}
     type_colors = {"tw": "#00C853", "us": "#FF3D00", "crypto": "#FFD600"}
-    type_labels["cash"] = "Cash"
-    type_colors["cash"] = "#7DD3FC"
-    for item in data:
+    for item in display_data:
         mtype = get_market_type(item['ticker'])
         if mtype in type_counts:
             type_counts[mtype] += 1
@@ -1137,7 +1145,7 @@ with st.sidebar:
         div[data-testid="stElementContainer"]:has(.{css_cls}) + div[data-testid="stElementContainer"] button {{
             background-color: {mtype_color} !important;
             border-color: rgba(255,255,255,0.2) !important;
-            color: {'#1E1E1E' if mtype_key in ['crypto', 'cash'] else 'white'} !important;
+            color: {'#1E1E1E' if mtype_key == 'crypto' else 'white'} !important;
             display: flex !important;
             justify-content: space-between !important;
             padding-left: 15px !important;
@@ -1165,7 +1173,7 @@ with st.sidebar:
                 st.session_state.active_type_filter.append(mtype_key)
             st.rerun()
 
-    for mtype_key in ["tw", "us", "crypto", "cash"]:
+    for mtype_key in ["tw", "us", "crypto"]:
         if type_counts[mtype_key] > 0:
             render_type_filter(mtype_key, type_labels[mtype_key], type_counts[mtype_key])
 
@@ -1173,7 +1181,7 @@ with st.sidebar:
     
     tag_counts = {}
     no_tag_count = 0
-    for item in data:
+    for item in display_data:
         tags = item.get('tags', [])
         if not tags:
             no_tag_count += 1
@@ -1320,7 +1328,7 @@ with st.sidebar:
     st.header("💼 狀態")
     held_count = 0
     not_held_count = 0
-    for item in data:
+    for item in display_data:
         if is_held_item(item):
             held_count += 1
         else:
@@ -1355,7 +1363,7 @@ with st.sidebar:
     # --- Rating Filter ---
     st.header("⭐ 評分")
     rating_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0, 0: 0}
-    for item in data:
+    for item in display_data:
         rate = item.get('rating', 0)
         if rate in rating_counts:
             rating_counts[rate] += 1
@@ -1440,7 +1448,7 @@ with c_spacer:
 
 with c_sort:
     sort_opts = [
-        "Type (TW > US > Crypto > Cash)",
+        "Type (TW > US > Crypto)",
         "1D Change (High > Low)", 
         "1D Change (Low > High)", 
         "30D Change (High > Low)", 
@@ -1527,7 +1535,7 @@ with c_set:
 # --- 排序邏輯 ---
 def apply_sort(items, method):
     if method.startswith("Type (TW > US > Crypto"):
-        order_map = {"tw": 0, "us": 1, "crypto": 2, "cash": 3}
+        order_map = {"tw": 0, "us": 1, "crypto": 2}
         return sorted(items, key=lambda x: order_map.get(get_market_type(x['ticker']), 99))
     elif method == "Rating (High > Low)":
         return sorted(items, key=lambda x: x.get('rating', 0), reverse=True)
@@ -1625,7 +1633,7 @@ def get_card_page_items(items):
     return items[start:end], page, total_pages, start, end
 
 sort_method = st.session_state.get('sort_pref', "Type (TW > US > Crypto)")
-current_items = apply_filters(data)
+current_items = apply_filters(display_data)
 prime_market_data_for_sort(current_items, sort_method)
 current_items = apply_sort(current_items, sort_method)
 
@@ -1642,21 +1650,23 @@ else:
 
 if not current_items:
     filters_active = bool(
-        st.session_state.get('active_tag_filter')
+        st.session_state.get('active_type_filter')
+        or st.session_state.get('active_tag_filter')
         or st.session_state.get('active_holding_filter')
         or st.session_state.get('active_rating_filter')
     )
-    if not data and connection_warning:
+    if not display_data and connection_warning:
         st.error(connection_warning)
         st.caption("Open Streamlit Cloud app settings and verify the [google_sheets] web_app_url/token secrets.")
-    elif data and filters_active:
+    elif display_data and filters_active:
         st.warning("No watchlist items match the active filters.")
         if st.button("Clear filters", use_container_width=True):
+            st.session_state.active_type_filter = []
             st.session_state.active_tag_filter = []
             st.session_state.active_holding_filter = []
             st.session_state.active_rating_filter = []
             st.rerun()
-    elif not data:
+    elif not display_data:
         st.warning("Google Sheets returned no watchlist items.")
         st.caption("Check that the Apps Script deployment is connected to the sheet tab named targets.")
     else:
