@@ -396,11 +396,8 @@ def get_default_item(ticker):
 
 def load_watchlist():
     local_data = _load_local_watchlist()
-    if local_data:
-        clear_connection_warning()
-        return _ensure_cash_item(local_data)
-
-    return load_watchlist_from_remote()
+    remote_data = load_watchlist_from_remote()
+    return remote_data or _ensure_cash_item(local_data)
 
 
 def load_watchlist_from_remote():
